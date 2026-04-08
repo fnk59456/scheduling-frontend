@@ -9,6 +9,7 @@ import { useAuth } from '@/hooks/useAuth'
 
 type AuthMode = 'firebase' | 'token'
 const AUTH_MODE = (import.meta.env.VITE_AUTH_MODE as AuthMode | undefined) || 'firebase'
+const BYPASS_AUTH = String(import.meta.env.VITE_BYPASS_AUTH || '').toLowerCase() === 'true'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -108,6 +109,17 @@ export default function LoginPage() {
                   '登入'
                 )}
               </Button>
+
+              {BYPASS_AUTH ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full h-11"
+                  onClick={() => navigate('/dashboard', { replace: true })}
+                >
+                  以示範模式進入（跳過登入）
+                </Button>
+              ) : null}
             </form>
           </CardContent>
         </Card>
