@@ -7,6 +7,9 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useAuth } from '@/hooks/useAuth'
 
+type AuthMode = 'firebase' | 'token'
+const AUTH_MODE = (import.meta.env.VITE_AUTH_MODE as AuthMode | undefined) || 'firebase'
+
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -49,21 +52,23 @@ export default function LoginPage() {
           <CardHeader className="space-y-1">
             <CardTitle className="text-2xl text-center">登入</CardTitle>
             <CardDescription className="text-center">
-              輸入您的帳號密碼以存取系統
+              {AUTH_MODE === 'token'
+                ? '本地開發模式：使用後端帳號密碼取得 Token'
+                : '輸入您的帳號密碼以存取系統'}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="email">電子郵件</Label>
+                <Label htmlFor="email">{AUTH_MODE === 'token' ? '帳號' : '電子郵件'}</Label>
                 <Input
                   id="email"
-                  type="email"
-                  placeholder="your@email.com"
+                  type={AUTH_MODE === 'token' ? 'text' : 'email'}
+                  placeholder={AUTH_MODE === 'token' ? 'superuser username' : 'your@email.com'}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  autoComplete="email"
+                  autoComplete={AUTH_MODE === 'token' ? 'username' : 'email'}
                   className="h-11"
                 />
               </div>

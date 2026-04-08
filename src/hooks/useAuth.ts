@@ -5,22 +5,54 @@ import { useAuthStore } from '@/stores/authStore'
 import { authApi } from '@/api/endpoints/auth'
 import { toast } from '@/hooks/use-toast'
 
+type AuthMode = 'firebase' | 'token'
+const AUTH_MODE = (import.meta.env.VITE_AUTH_MODE as AuthMode | undefined) || 'firebase'
+
 export function useAuth() {
-  const { user, isAuthenticated, isLoading, setUser, setLoading, logout: storeLogout } = useAuthStore()
+  const { user, isAuthenticated, isLoading, devApiToken, setUser, setLoading, setDevApiToken, logout: storeLogout } = useAuthStore()
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
+    if (AUTH_MODE === 'token') {
+      ;(async () => {
+        const token = devApiToken
+        if (!token) {
+          setUser(null)
+          setLoading(false)
+          return
+        }
         try {
           const profile = await authApi.getMe()
           setUser(profile)
         } catch {
+          setDevApiToken(null)
           setUser(null)
+        } finally {
+          setLoading(false)
         }
-      } else {
-        setUser(null)
-      }
+      })()
+      return
+    }
+
+    if (!auth) {
+      setUser(null)
       setLoading(false)
+      return
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!firebaseUser) {
+        setUser(null)
+        setLoading(false)
+        return
+      }
+      try {
+        const profile = await authApi.getMe()
+        setUser(profile)
+      } catch {
+        setUser(null)
+      } finally {
+        setLoading(false)
+      }
     })
     return () => unsubscribe()
   }, [setUser, setLoading])
@@ -28,6 +60,15 @@ export function useAuth() {
   const login = useCallback(async (email: string, password: string) => {
     try {
       setLoading(true)
+      if (AUTH_MODE === 'token') {
+        const res = await authApi.login({ username: email, password })
+        setDevApiToken(res.token)
+        setUser(res.user)
+        toast({ title: '登入成功', description: `歡迎回來，${res.user.first_name || res.user.username}` })
+        return
+      }
+
+      if (!auth) throw new Error('Firebase 未初始化（請檢查 VITE_AUTH_MODE / Firebase env）')
       await signInWithEmailAndPassword(auth, email, password)
       const profile = await authApi.getMe()
       setUser(profile)
@@ -43,6 +84,17 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     try {
+      if (AUTH_MODE === 'token') {
+        setDevApiToken(null)
+        storeLogout()
+        toast({ title: '已登出', description: '您已安全登出系統' })
+        return
+      }
+
+      if (!auth) {
+        storeLogout()
+        return
+      }
       await signOut(auth)
       storeLogout()
       toast({ title: '已登出', description: '您已安全登出系統' })

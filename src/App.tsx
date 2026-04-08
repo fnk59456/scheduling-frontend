@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from '@/components/providers/ThemeProvider'
 import { MainLayout } from '@/components/layout/MainLayout'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
+import { useAuth } from '@/hooks/useAuth'
 import LoginPage from '@/pages/LoginPage'
 import DashboardPage from '@/pages/DashboardPage'
 import EmployeesPage from '@/pages/employees/EmployeesPage'
@@ -25,6 +26,9 @@ const queryClient = new QueryClient({
 })
 
 function App() {
+  // 重要：在 App 根層先啟動認證初始化，避免 ProtectedRoute loading 死鎖
+  useAuth()
+
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>

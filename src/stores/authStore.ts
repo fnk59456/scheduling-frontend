@@ -6,8 +6,10 @@ interface AuthState {
   user: UserProfile | null
   isAuthenticated: boolean
   isLoading: boolean
+  devApiToken: string | null
   setUser: (user: UserProfile | null) => void
   setLoading: (loading: boolean) => void
+  setDevApiToken: (token: string | null) => void
   logout: () => void
   hasRole: (roles: RoleName[]) => boolean
 }
@@ -18,10 +20,12 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       isAuthenticated: false,
       isLoading: true,
+      devApiToken: null,
 
       setUser: (user) => set({ user, isAuthenticated: !!user }),
       setLoading: (isLoading) => set({ isLoading }),
-      logout: () => set({ user: null, isAuthenticated: false }),
+      setDevApiToken: (devApiToken) => set({ devApiToken }),
+      logout: () => set({ user: null, isAuthenticated: false, devApiToken: null }),
 
       hasRole: (roles) => {
         const { user } = get()
@@ -31,7 +35,11 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'scheduling-auth',
-      partialize: (state) => ({ user: state.user, isAuthenticated: state.isAuthenticated }),
+      partialize: (state) => ({
+        user: state.user,
+        isAuthenticated: state.isAuthenticated,
+        devApiToken: state.devApiToken,
+      }),
     }
   )
 )
