@@ -24,6 +24,7 @@ export function useAuth() {
           const profile = await authApi.getMe()
           setUser(profile)
         } catch {
+          // token 失效或後端拒絕：清理狀態，讓 ProtectedRoute 正常導回登入頁
           setDevApiToken(null)
           setUser(null)
         } finally {
@@ -55,7 +56,7 @@ export function useAuth() {
       }
     })
     return () => unsubscribe()
-  }, [setUser, setLoading])
+  }, [devApiToken, setDevApiToken, setUser, setLoading])
 
   const login = useCallback(async (email: string, password: string) => {
     try {
@@ -80,7 +81,7 @@ export function useAuth() {
     } finally {
       setLoading(false)
     }
-  }, [setUser, setLoading])
+  }, [setDevApiToken, setUser, setLoading])
 
   const logout = useCallback(async () => {
     try {
@@ -102,7 +103,7 @@ export function useAuth() {
       const message = error instanceof Error ? error.message : '登出時發生錯誤'
       toast({ title: '登出失敗', description: message, variant: 'destructive' })
     }
-  }, [storeLogout])
+  }, [setDevApiToken, storeLogout])
 
   return { user, isAuthenticated, isLoading, login, logout }
 }

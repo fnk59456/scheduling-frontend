@@ -13,6 +13,8 @@ import OrganizationsPage from '@/pages/settings/OrganizationsPage'
 import ShiftTemplatesPage from '@/pages/settings/ShiftTemplatesPage'
 import ShiftRulesPage from '@/pages/settings/ShiftRulesPage'
 import CertificationsPage from '@/pages/settings/CertificationsPage'
+import SchedulesPage from '@/pages/schedules/SchedulesPage'
+import AttendancePage from '@/pages/attendance/AttendancePage'
 import PlaceholderPage from '@/pages/PlaceholderPage'
 import './index.css'
 
@@ -26,20 +28,27 @@ const queryClient = new QueryClient({
 })
 
 function App() {
+  // 暫時開關：Firebase 部署時可跳過登入介面（避免綁定本地 docker API）
+  // 使用方式：在 .env.production 或 Firebase Hosting env 對應 build 設定 VITE_BYPASS_AUTH=true
+  const BYPASS_AUTH = String(import.meta.env.VITE_BYPASS_AUTH || '').toLowerCase() === 'true'
+
   // 重要：在 App 根層先啟動認證初始化，避免 ProtectedRoute loading 死鎖
-  useAuth()
+  // 若開啟 BYPASS_AUTH，則不啟動 useAuth（避免一直打 /auth/users/me 或 token 相關請求）
+  if (!BYPASS_AUTH) {
+    useAuth()
+  }
 
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
         <Router>
           <Routes>
-            <Route path="/login" element={<LoginPage />} />
+            <Route path="/login" element={BYPASS_AUTH ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
 
             <Route
               path="/*"
               element={
-                <ProtectedRoute>
+                BYPASS_AUTH ? (
                   <MainLayout>
                     <Routes>
                       <Route path="/dashboard" element={<DashboardPage />} />
@@ -58,8 +67,8 @@ function App() {
                       </Route>
 
                       {/* 後續週次功能佔位 */}
-                      <Route path="/schedules" element={<PlaceholderPage title="排班管理" description="排班表建立、查詢與管理" weekLabel="第 3 週" />} />
-                      <Route path="/attendance" element={<PlaceholderPage title="出勤管理" description="打卡紀錄與異常標記" weekLabel="第 5 週" />} />
+                      <Route path="/schedules" element={<SchedulesPage />} />
+                      <Route path="/attendance" element={<AttendancePage />} />
                       <Route path="/overtime" element={<PlaceholderPage title="加班管理" description="加班紀錄與費用試算" weekLabel="第 9 週" />} />
                       <Route path="/compliance" element={<PlaceholderPage title="合規檢查" description="勞基法合規驗證" weekLabel="第 7 週" />} />
                       <Route path="/help" element={<PlaceholderPage title="幫助中心" description="使用指南與常見問題" />} />
@@ -68,7 +77,38 @@ function App() {
                       <Route path="*" element={<PlaceholderPage title="404 頁面不存在" description="您要找的頁面不存在" />} />
                     </Routes>
                   </MainLayout>
-                </ProtectedRoute>
+                ) : (
+                  <ProtectedRoute>
+                    <MainLayout>
+                      <Routes>
+                        <Route path="/dashboard" element={<DashboardPage />} />
+
+                        {/* 員工管理 */}
+                        <Route path="/employees" element={<EmployeesPage />} />
+                        <Route path="/employees/:id" element={<EmployeeDetailPage />} />
+
+                        {/* 系統設定（Tabs 布局） */}
+                        <Route path="/settings" element={<SettingsPage />}>
+                          <Route index element={<Navigate to="/settings/organizations" replace />} />
+                          <Route path="organizations" element={<OrganizationsPage />} />
+                          <Route path="shifts" element={<ShiftTemplatesPage />} />
+                          <Route path="rules" element={<ShiftRulesPage />} />
+                          <Route path="certifications" element={<CertificationsPage />} />
+                        </Route>
+
+                        {/* 後續週次功能佔位 */}
+                        <Route path="/schedules" element={<SchedulesPage />} />
+                        <Route path="/attendance" element={<AttendancePage />} />
+                        <Route path="/overtime" element={<PlaceholderPage title="加班管理" description="加班紀錄與費用試算" weekLabel="第 9 週" />} />
+                        <Route path="/compliance" element={<PlaceholderPage title="合規檢查" description="勞基法合規驗證" weekLabel="第 7 週" />} />
+                        <Route path="/help" element={<PlaceholderPage title="幫助中心" description="使用指南與常見問題" />} />
+
+                        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                        <Route path="*" element={<PlaceholderPage title="404 頁面不存在" description="您要找的頁面不存在" />} />
+                      </Routes>
+                    </MainLayout>
+                  </ProtectedRoute>
+                )
               }
             />
           </Routes>

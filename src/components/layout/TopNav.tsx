@@ -13,6 +13,14 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/hooks/useAuth'
 import { Badge } from '@/components/ui/badge'
+import type { RoleName } from '@/types/auth'
+
+const roleLabels: Record<RoleName, string> = {
+  admin: '系統管理員',
+  manager: '主管',
+  supervisor: '督導',
+  employee: '員工',
+}
 
 export function TopNav() {
   const { setTheme } = useTheme()
@@ -32,6 +40,7 @@ export function TopNav() {
   }
 
   const userInitial = user?.first_name?.[0] || user?.username?.[0]?.toUpperCase() || 'U'
+  const roleLabel = (user?.role_name ? roleLabels[user.role_name as RoleName] : null) || user?.role_name || '員工'
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 shadow-sm">
@@ -108,7 +117,7 @@ export function TopNav() {
                     {user?.first_name || user?.username || '使用者'}
                   </span>
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                    {user?.role_name || '員工'}
+                    {roleLabel}
                   </Badge>
                 </div>
               </Button>
@@ -117,7 +126,9 @@ export function TopNav() {
               <div className="p-2 border-b">
                 <p className="font-medium">{user?.first_name || user?.username}</p>
                 <p className="text-xs text-muted-foreground">{user?.email}</p>
-                <p className="text-xs text-muted-foreground">{user?.organization_name}</p>
+                {user?.organization_name ? (
+                  <p className="text-xs text-muted-foreground">{user.organization_name}</p>
+                ) : null}
               </div>
               <DropdownMenuItem className="cursor-pointer">
                 <User className="mr-2 h-4 w-4" />個人資料
