@@ -20,7 +20,9 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       isAuthenticated: false,
       isLoading: true,
-      devApiToken: null,
+      // 注意：這是開發/驗收用 token（VITE_AUTH_MODE=token 時使用）
+      // 若要避免寫死在程式碼，建議改成從環境變數或登入流程寫入。
+      devApiToken: '8eea3ddbf32a86283da70f6c4cad8c64b749e67d',
 
       setUser: (user) => set({ user, isAuthenticated: !!user }),
       setLoading: (isLoading) => set({ isLoading }),

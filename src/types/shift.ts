@@ -50,3 +50,20 @@ export interface ShiftRuleCreateRequest {
   rule_type: ShiftRuleType
   value: Record<string, unknown>
 }
+
+// ===== 班別員工優先順序 (後端 2026-04 新增) =====
+
+export interface ShiftEmployeePriority {
+  id: number
+  employee: number
+  employee_name: string
+  priority_rank: number // 1 = 最優先
+  max_extra_shifts: number | null // null = 不限
+}
+
+// PUT 整批替換時使用的 item (不含 id / employee_name)
+export interface ShiftEmployeePriorityUpdateItem {
+  employee: number
+  priority_rank: number
+  max_extra_shifts: number | null
+}

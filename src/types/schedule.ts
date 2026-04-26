@@ -100,3 +100,21 @@ export interface ScheduleChange {
   approved_at: string | null
 }
 
+// ===== 版本比對 (後端 2026-04 修正：differences 從永遠空陣列 → 真實差異) =====
+// 同 (employee_id, schedule_date, shift_template_id) 下，
+// expected_hours / status / notes 不同時會出現在 differences 陣列。
+
+export interface ScheduleDifference {
+  key: string // "employeeId_date_shiftTemplateId"
+  version1: Schedule
+  version2: Schedule
+}
+
+export interface ScheduleCompareResult {
+  version1: ScheduleVersion
+  version2: ScheduleVersion
+  only_in_version1: string[]
+  only_in_version2: string[]
+  differences: ScheduleDifference[]
+}
+

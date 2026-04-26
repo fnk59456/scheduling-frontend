@@ -7,6 +7,7 @@ import type {
   ScheduleCreateRequest,
   ScheduleUpdateRequest,
   ScheduleChange,
+  ScheduleCompareResult,
 } from '@/types/schedule'
 
 export const scheduleVersionsApi = {
@@ -31,9 +32,13 @@ export const scheduleVersionsApi = {
   createDualVersions: (id: number) =>
     apiClient.post<ScheduleVersion>(`/schedules/versions/${id}/create_dual_versions/`, {}).then((r) => r.data),
 
+  // 後端 2026-04 修正：differences 現在會回傳真實差異（同員工同日期同班別，但
+  // expected_hours / status / notes 有差異者），前端 UI 需能正確渲染。
   compare: (id: number, version2Id: number) =>
     apiClient
-      .get(`/schedules/versions/${id}/compare/`, { params: { version2_id: version2Id } })
+      .get<ScheduleCompareResult>(`/schedules/versions/${id}/compare/`, {
+        params: { version2_id: version2Id },
+      })
       .then((r) => r.data),
 }
 
