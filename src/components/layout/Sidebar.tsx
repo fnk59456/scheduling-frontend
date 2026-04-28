@@ -9,8 +9,9 @@ import {
   Timer,
   ShieldCheck,
   Settings,
-  HelpCircle,
   Sparkles,
+  Brain,
+  FileText,
 } from 'lucide-react'
 import type { RoleName } from '@/types/auth'
 import type { LucideIcon } from 'lucide-react'
@@ -40,14 +41,14 @@ const navigationSections: { title: string; items: NavItem[] }[] = [
         href: '/schedules',
         icon: CalendarDays,
         color: 'bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-300',
-        description: '排班表建立與管理',
+        description: '排班表與版本管理',
       },
       {
         name: '員工管理',
         href: '/employees',
         icon: Users,
         color: 'bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-300',
-        description: '員工資料與證照管理',
+        description: '員工資料與可用性設定',
       },
       {
         name: '出勤管理',
@@ -66,7 +67,7 @@ const navigationSections: { title: string; items: NavItem[] }[] = [
         href: '/overtime',
         icon: Timer,
         color: 'bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-300',
-        description: '加班記錄與費用試算',
+        description: '加班時數與費用試算',
       },
       {
         name: '合規檢查',
@@ -74,6 +75,20 @@ const navigationSections: { title: string; items: NavItem[] }[] = [
         icon: ShieldCheck,
         color: 'bg-teal-100 text-teal-600 dark:bg-teal-900/40 dark:text-teal-300',
         description: '勞基法合規驗證',
+      },
+      {
+        name: 'AI 法規助手',
+        href: '/ai',
+        icon: Brain,
+        color: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300',
+        description: '勞基法智慧問答',
+      },
+      {
+        name: '操作日誌',
+        href: '/audit',
+        icon: FileText,
+        color: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+        description: '稽核與操作歷史',
       },
     ],
   },
@@ -88,13 +103,6 @@ const navigationSections: { title: string; items: NavItem[] }[] = [
         description: '班別、規則與組織設定',
         roles: ['admin', 'manager'],
       },
-      {
-        name: '幫助中心',
-        href: '/help',
-        icon: HelpCircle,
-        color: 'bg-sky-100 text-sky-600 dark:bg-sky-900/40 dark:text-sky-300',
-        description: '使用指南與常見問題',
-      },
     ],
   },
 ]
@@ -107,8 +115,8 @@ export function Sidebar() {
   return (
     <div className="hidden border-r bg-background/80 backdrop-blur-sm md:block w-64 shadow-sm h-full">
       <div className="flex h-full flex-col">
-        <div className="flex-1 overflow-auto py-4 px-3">
-          <div className="space-y-1">
+        <div className="flex-1 overflow-auto py-3 px-3">
+          <div className="space-y-0.5">
             {navigationSections.map((section) => (
               <SidebarSection
                 key={section.title}
@@ -120,11 +128,11 @@ export function Sidebar() {
           </div>
         </div>
 
-        <div className="border-t px-3 py-4">
+        <div className="border-t px-4 py-3">
           <div className="flex items-center justify-between">
-            <div className="text-sm font-medium text-muted-foreground">AI 排班系統</div>
-            <div className="flex items-center space-x-2">
-              <Sparkles className="h-4 w-4 text-primary" />
+            <span className="text-xs text-muted-foreground">AI 排班系統</span>
+            <div className="flex items-center gap-1">
+              <Sparkles className="h-3.5 w-3.5 text-primary" />
               <span className="text-xs text-primary">v1.0</span>
             </div>
           </div>
@@ -138,40 +146,42 @@ function SidebarSection({ title, items, pathname }: { title: string; items: NavI
   if (items.length === 0) return null
 
   return (
-    <div className="px-3 pb-3 border-b">
-      <h2 className="mb-2 text-lg font-semibold tracking-tight">{title}</h2>
-      <nav className="grid items-start text-sm font-medium gap-2">
-        {items.map((item) => (
-          <Link
-            key={item.href}
-            to={item.href}
-            className={cn(
-              'flex w-full items-center text-left gap-3 rounded-lg px-3 py-2.5 transition-all group relative',
-              pathname === item.href || pathname.startsWith(item.href + '/')
-                ? 'bg-primary/10 text-primary font-semibold shadow-sm'
-                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-            )}
-          >
-            <span
+    <div className="px-1 pb-3 border-b last:border-b-0">
+      <h2 className="mb-2 text-xs font-semibold tracking-tight px-2 pt-2 text-muted-foreground uppercase">{title}</h2>
+      <nav className="grid gap-0.5 text-sm">
+        {items.map((item) => {
+          const active = pathname === item.href || pathname.startsWith(item.href + '/')
+          return (
+            <Link
+              key={item.href}
+              to={item.href}
               className={cn(
-                'rounded-full p-2 flex items-center justify-center transition-all duration-200',
-                item.color,
-                pathname === item.href ? 'shadow-inner' : 'group-hover:shadow'
+                'flex w-full items-center text-left gap-3 rounded-lg px-2.5 py-2 transition-all group relative',
+                active
+                  ? 'bg-primary/10 text-primary font-semibold'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               )}
             >
-              <item.icon className="h-5 w-5" />
-            </span>
-            <div className="flex flex-col">
-              <span>{item.name}</span>
-              {(pathname === item.href || pathname.startsWith(item.href + '/')) && (
-                <span className="text-xs text-muted-foreground font-normal">{item.description}</span>
+              <span
+                className={cn(
+                  'rounded-full p-1.5 flex items-center justify-center transition-all shrink-0',
+                  item.color
+                )}
+              >
+                <item.icon className="h-4 w-4" />
+              </span>
+              <div className="flex flex-col flex-1 min-w-0">
+                <span className="truncate">{item.name}</span>
+                {active && (
+                  <span className="text-[10px] text-muted-foreground font-normal truncate">{item.description}</span>
+                )}
+              </div>
+              {active && (
+                <span className="absolute right-1.5 top-1/2 -translate-y-1/2 w-1 h-6 bg-primary rounded-full" />
               )}
-            </div>
-            {(pathname === item.href || pathname.startsWith(item.href + '/')) && (
-              <span className="absolute right-2 top-1/2 -translate-y-1/2 w-1.5 h-8 bg-primary rounded-full" />
-            )}
-          </Link>
-        ))}
+            </Link>
+          )
+        })}
       </nav>
     </div>
   )

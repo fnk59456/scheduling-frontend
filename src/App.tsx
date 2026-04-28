@@ -13,8 +13,13 @@ import OrganizationsPage from '@/pages/settings/OrganizationsPage'
 import ShiftTemplatesPage from '@/pages/settings/ShiftTemplatesPage'
 import ShiftRulesPage from '@/pages/settings/ShiftRulesPage'
 import CertificationsPage from '@/pages/settings/CertificationsPage'
+import EmployeePrioritiesPage from '@/pages/settings/EmployeePrioritiesPage'
 import SchedulesPage from '@/pages/schedules/SchedulesPage'
 import AttendancePage from '@/pages/attendance/AttendancePage'
+import OvertimePage from '@/pages/overtime/OvertimePage'
+import CompliancePage from '@/pages/compliance/CompliancePage'
+import AIAssistantPage from '@/pages/ai/AIAssistantPage'
+import AuditPage from '@/pages/audit/AuditPage'
 import PlaceholderPage from '@/pages/PlaceholderPage'
 import './index.css'
 
@@ -59,18 +64,21 @@ function App() {
 
                       {/* 系統設定（Tabs 布局） */}
                       <Route path="/settings" element={<SettingsPage />}>
-                        <Route index element={<Navigate to="/settings/organizations" replace />} />
-                        <Route path="organizations" element={<OrganizationsPage />} />
+                        <Route index element={<Navigate to="/settings/shifts" replace />} />
                         <Route path="shifts" element={<ShiftTemplatesPage />} />
+                        <Route path="priorities" element={<EmployeePrioritiesPage />} />
                         <Route path="rules" element={<ShiftRulesPage />} />
+                        <Route path="organizations" element={<OrganizationsPage />} />
                         <Route path="certifications" element={<CertificationsPage />} />
                       </Route>
 
                       {/* 後續週次功能佔位 */}
                       <Route path="/schedules" element={<SchedulesPage />} />
                       <Route path="/attendance" element={<AttendancePage />} />
-                      <Route path="/overtime" element={<PlaceholderPage title="加班管理" description="加班紀錄與費用試算" weekLabel="第 9 週" />} />
-                      <Route path="/compliance" element={<PlaceholderPage title="合規檢查" description="勞基法合規驗證" weekLabel="第 7 週" />} />
+                      <Route path="/overtime" element={<OvertimePage />} />
+                      <Route path="/compliance" element={<CompliancePage />} />
+                      <Route path="/ai" element={<AIAssistantPage />} />
+                      <Route path="/audit" element={<AuditPage />} />
                       <Route path="/help" element={<PlaceholderPage title="幫助中心" description="使用指南與常見問題" />} />
 
                       <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -99,8 +107,10 @@ function App() {
                         {/* 後續週次功能佔位 */}
                         <Route path="/schedules" element={<SchedulesPage />} />
                         <Route path="/attendance" element={<AttendancePage />} />
-                        <Route path="/overtime" element={<PlaceholderPage title="加班管理" description="加班紀錄與費用試算" weekLabel="第 9 週" />} />
-                        <Route path="/compliance" element={<PlaceholderPage title="合規檢查" description="勞基法合規驗證" weekLabel="第 7 週" />} />
+                        <Route path="/overtime" element={<OvertimePage />} />
+                        <Route path="/compliance" element={<CompliancePage />} />
+                        <Route path="/ai" element={<AIAssistantPage />} />
+                        <Route path="/audit" element={<AuditPage />} />
                         <Route path="/help" element={<PlaceholderPage title="幫助中心" description="使用指南與常見問題" />} />
 
                         <Route path="/" element={<Navigate to="/dashboard" replace />} />

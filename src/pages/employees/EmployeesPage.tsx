@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, UserCheck, UserX } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -16,6 +17,17 @@ const contractTypeLabels: Record<string, string> = {
   part_time: '兼職',
   dispatch: '派遣',
 }
+
+const AVATAR_COLORS = [
+  'bg-blue-500',
+  'bg-emerald-500',
+  'bg-purple-500',
+  'bg-rose-500',
+  'bg-amber-500',
+  'bg-teal-500',
+  'bg-indigo-500',
+  'bg-gray-500',
+]
 
 export default function EmployeesPage() {
   const navigate = useNavigate()
@@ -43,12 +55,21 @@ export default function EmployeesPage() {
       key: 'user_name',
       title: '姓名',
       sortable: true,
-      render: (row) => (
-        <div>
-          <p className="font-medium">{row.user_name || `${row.user.first_name} ${row.user.last_name}`.trim() || row.user.username}</p>
-          <p className="text-xs text-muted-foreground">{row.user_email || row.user.email}</p>
-        </div>
-      ),
+      render: (row) => {
+        const name = row.user_name || `${row.user.first_name} ${row.user.last_name}`.trim() || row.user.username
+        const avatarColor = AVATAR_COLORS[row.id % AVATAR_COLORS.length]
+        return (
+          <div className="flex items-center gap-2.5">
+            <div className={cn('h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0', avatarColor)}>
+              {name.slice(0, 1)}
+            </div>
+            <div>
+              <p className="font-medium">{name}</p>
+              <p className="text-xs text-muted-foreground">{row.user_email || row.user.email}</p>
+            </div>
+          </div>
+        )
+      },
     },
     { key: 'position', title: '職位', sortable: true },
     {

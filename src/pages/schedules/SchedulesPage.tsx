@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, Settings2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, Settings2, CheckCircle, Clock } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -68,18 +68,16 @@ function clampDate(d: Date, min?: Date, max?: Date) {
 
 const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日']
 
-function statusBadgeVariant(status: ScheduleStatus) {
-  switch (status) {
-    case 'confirmed':
-      return 'default'
-    case 'assigned':
-      return 'secondary'
-    case 'cancelled':
-      return 'destructive'
-    default:
-      return 'outline'
-  }
-}
+// Cycle through colors for shift templates (by their list index)
+const shiftChipColors = [
+  { bg: 'bg-sky-50',    border: 'border-sky-200',    text: 'text-sky-700',    dot: 'bg-sky-500' },
+  { bg: 'bg-amber-50',  border: 'border-amber-200',  text: 'text-amber-700',  dot: 'bg-amber-500' },
+  { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', dot: 'bg-violet-500' },
+  { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', dot: 'bg-indigo-500' },
+  { bg: 'bg-rose-50',   border: 'border-rose-200',   text: 'text-rose-700',   dot: 'bg-rose-500' },
+  { bg: 'bg-emerald-50',border: 'border-emerald-200',text: 'text-emerald-700',dot: 'bg-emerald-500' },
+]
+
 
 export default function SchedulesPage() {
   const { data: orgsData } = useOrganizations()
@@ -568,42 +566,49 @@ export default function SchedulesPage() {
                 </thead>
                 <tbody>
                   {employees.map((e) => (
-                    <tr key={e.id} className="border-b last:border-b-0 hover:bg-muted/40">
+                    <tr key={e.id} className="border-b last:border-b-0 hover:bg-muted/20">
                       <td className="p-3 align-top">
-                        <div className="font-medium">{e.user_name || `${e.user.first_name} ${e.user.last_name}`.trim() || e.user.username}</div>
-                        <div className="text-xs text-muted-foreground">{e.employee_id} · {e.position}</div>
+                        <div className="flex items-center gap-2">
+                          <div className="h-7 w-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-semibold shrink-0">
+                            {(e.user_name || e.user.first_name || e.user.username).slice(0, 1)}
+                          </div>
+                          <div>
+                            <div className="font-medium text-sm">{e.user_name || `${e.user.first_name} ${e.user.last_name}`.trim() || e.user.username}</div>
+                            <div className="text-[11px] text-muted-foreground">{e.employee_id} · {e.position}</div>
+                          </div>
+                        </div>
                       </td>
                       {weekDays.map((d) => {
                         const date = fmtDate(d)
                         const key = `${e.id}:${date}`
                         const s = scheduleByEmployeeDate.get(key)
+                        const tplIdx = s ? templates.findIndex((t) => t.id === s.shift_template.id) : -1
+                        const chip = tplIdx >= 0 ? shiftChipColors[tplIdx % shiftChipColors.length] : null
                         return (
-                          <td key={date} className="p-2 align-top">
-                            {s ? (
+                          <td key={date} className="p-1.5 align-top">
+                            {s && chip ? (
                               <button
                                 type="button"
-                                className="w-full text-left rounded-md border px-2 py-2 hover:bg-muted transition"
+                                className={`w-full text-left rounded-md border px-2 py-2 transition hover:shadow-sm ${chip.bg} ${chip.border}`}
                                 onClick={() => openEditSchedule(s)}
                               >
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="font-medium truncate">{s.shift_template.name}</div>
-                                  <Badge variant={statusBadgeVariant(s.status)} className="shrink-0">
-                                    {s.status_display}
-                                  </Badge>
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className={`font-semibold text-xs ${chip.text}`}>{s.shift_template.name}</span>
+                                  {s.status === 'confirmed'
+                                    ? <CheckCircle className="h-3 w-3 text-emerald-600 shrink-0" />
+                                    : <Clock className="h-3 w-3 text-muted-foreground shrink-0" />}
                                 </div>
-                                <div className="text-xs text-muted-foreground mt-1">
-                                  {s.shift_template.start_time.slice(0, 5)} - {s.shift_template.end_time.slice(0, 5)}
+                                <div className="text-[10px] text-muted-foreground mt-0.5 font-mono">
+                                  {s.shift_template.start_time.slice(0, 5)}-{s.shift_template.end_time.slice(0, 5)}
                                 </div>
-                                {/* 第 3 週先做占位：後續接後端合規/違規結果再在此處顯示 */}
                               </button>
                             ) : (
                               <button
                                 type="button"
-                                className="w-full rounded-md border border-dashed px-2 py-6 text-muted-foreground hover:bg-muted transition"
+                                className="w-full rounded-md border border-dashed px-2 py-5 text-muted-foreground hover:bg-muted/40 hover:border-primary/40 transition text-xs"
                                 onClick={() => openCreateScheduleAt(e.id, d)}
                               >
-                                <Plus className="h-4 w-4 inline mr-1" />
-                                指派
+                                <Plus className="h-3 w-3 inline mr-0.5" />指派
                               </button>
                             )}
                           </td>
@@ -613,6 +618,22 @@ export default function SchedulesPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {templates.length > 0 && (
+            <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+              {templates.map((t, i) => {
+                const c = shiftChipColors[i % shiftChipColors.length]
+                return (
+                  <div key={t.id} className="flex items-center gap-1.5">
+                    <span className={`h-2 w-2 rounded-full ${c.dot}`} />
+                    {t.name}
+                  </div>
+                )
+              })}
+              <span className="mx-1">·</span>
+              <div className="flex items-center gap-1.5"><CheckCircle className="h-3 w-3 text-emerald-600" />已確認</div>
+              <div className="flex items-center gap-1.5"><Clock className="h-3 w-3 text-muted-foreground" />已指派</div>
             </div>
           )}
         </CardContent>

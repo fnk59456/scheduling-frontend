@@ -32,6 +32,7 @@ export const useAuthStore = create<AuthState>()(
       hasRole: (roles) => {
         const { user } = get()
         if (!user) return false
+        if (!user.role_name) return true  // superuser / no role assigned = full access
         return roles.includes(user.role_name as RoleName)
       },
     }),
