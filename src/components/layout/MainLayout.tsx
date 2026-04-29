@@ -9,7 +9,7 @@ interface MainLayoutProps {
 
 export function MainLayout({ children }: MainLayoutProps) {
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-gradient-to-b from-background via-background to-muted/30 flex flex-col">
       <TopNav />
       <div className="flex flex-1 overflow-hidden">
         <div className="hidden md:block w-64 fixed left-0 top-16 h-[calc(100vh-4rem)] z-30">

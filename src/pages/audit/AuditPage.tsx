@@ -38,7 +38,7 @@ export default function AuditPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">操作日誌</h1>
+          <h1 className="text-2xl font-bold tracking-tight">操作日誌</h1>
           <p className="text-muted-foreground mt-1">所有使用者與系統操作皆有不可竄改之稽核紀錄</p>
         </div>
         <Button variant="outline">

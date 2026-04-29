@@ -382,7 +382,7 @@ export default function SchedulesPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">排班管理</h1>
+          <h1 className="text-2xl font-bold tracking-tight">排班管理</h1>
           <p className="text-muted-foreground mt-1">第 3 週：版本管理、週排班 Grid、基礎 CRUD</p>
         </div>
         <div className="flex flex-wrap gap-2">

@@ -147,7 +147,7 @@ function SidebarSection({ title, items, pathname }: { title: string; items: NavI
 
   return (
     <div className="px-1 pb-3 border-b last:border-b-0">
-      <h2 className="mb-2 text-xs font-semibold tracking-tight px-2 pt-2 text-muted-foreground uppercase">{title}</h2>
+      <h2 className="mb-2 text-sm font-semibold tracking-tight px-2 pt-2">{title}</h2>
       <nav className="grid gap-0.5 text-sm">
         {items.map((item) => {
           const active = pathname === item.href || pathname.startsWith(item.href + '/')

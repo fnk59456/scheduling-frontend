@@ -12,7 +12,6 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/hooks/useAuth'
-import { Badge } from '@/components/ui/badge'
 import type { RoleName } from '@/types/auth'
 
 const roleLabels: Record<RoleName, string> = {
@@ -49,11 +48,14 @@ export function TopNav() {
           <Button variant="ghost" size="icon" className="md:hidden" onClick={toggleMobileMenu}>
             {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
-          <a href="/" className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center">
+          <a href="/" className="flex items-center gap-2.5">
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary via-blue-500 to-indigo-600 flex items-center justify-center shadow-sm">
               <CalendarDays className="h-5 w-5 text-primary-foreground" />
             </div>
-            <span className="hidden font-bold text-lg md:inline-block">AI 智慧排班</span>
+            <div className="text-left hidden md:block">
+              <div className="font-bold text-[15px] leading-tight">AI 智慧排班</div>
+              <div className="text-[10px] text-muted-foreground leading-tight">Scheduling System · MVP</div>
+            </div>
           </a>
         </div>
 
@@ -113,12 +115,12 @@ export function TopNav() {
                   </AvatarFallback>
                 </Avatar>
                 <div className="hidden md:block text-left">
-                  <span className="block text-sm font-medium">
+                  <span className="block text-sm font-medium leading-tight">
                     {user?.first_name || user?.username || '使用者'}
                   </span>
-                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                    {roleLabel}
-                  </Badge>
+                  <span className="text-[10px] text-muted-foreground leading-tight">
+                    {roleLabel}{user?.branch_name || user?.organization_name ? ` · ${user?.branch_name || user?.organization_name}` : ''}
+                  </span>
                 </div>
               </Button>
             </DropdownMenuTrigger>

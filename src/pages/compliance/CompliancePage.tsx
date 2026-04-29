@@ -71,7 +71,7 @@ export default function CompliancePage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">合規檢查</h1>
+          <h1 className="text-2xl font-bold tracking-tight">合規檢查</h1>
           <p className="text-muted-foreground mt-1">即時掃描本週排班，依勞基法條文分級標示違規</p>
         </div>
         <Button onClick={() => toast({ title: '重新掃描完成', description: `共發現 ${mockViolations.length} 筆違規` })}>

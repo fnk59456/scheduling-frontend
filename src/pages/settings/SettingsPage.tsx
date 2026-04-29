@@ -15,7 +15,7 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">系統設定</h1>
+        <h1 className="text-2xl font-bold tracking-tight">系統設定</h1>
         <p className="text-muted-foreground mt-1">班別模板、排班規則、員工優先順序與機構資料</p>
       </div>
 

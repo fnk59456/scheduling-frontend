@@ -82,7 +82,7 @@ export default function OrganizationsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">組織與分店管理</h1>
+          <h1 className="text-2xl font-bold tracking-tight">組織與分店管理</h1>
           <p className="text-muted-foreground mt-1">管理機構與分店資料</p>
         </div>
         <div className="flex gap-2">

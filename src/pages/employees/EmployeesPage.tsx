@@ -110,7 +110,7 @@ export default function EmployeesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">員工管理</h1>
+          <h1 className="text-2xl font-bold tracking-tight">員工管理</h1>
           <p className="text-muted-foreground mt-1">管理員工資料、契約與證照</p>
         </div>
         <Button onClick={() => setShowCreateDialog(true)}>

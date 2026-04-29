@@ -25,7 +25,7 @@ export default function OvertimePage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">加班管理</h1>
+          <h1 className="text-2xl font-bold tracking-tight">加班管理</h1>
           <p className="text-muted-foreground mt-1">自動依勞基法 §24 試算加班費（1.34、1.67、2.0 倍）</p>
         </div>
         <Button variant="outline">

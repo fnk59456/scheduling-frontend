@@ -88,7 +88,7 @@ export default function AIAssistantPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">AI 法規助手</h1>
+        <h1 className="text-2xl font-bold tracking-tight">AI 法規助手</h1>
         <p className="text-muted-foreground mt-1">基於《勞動基準法》的智慧問答 · 引用條文並結合您機構的實際情境</p>
       </div>
 

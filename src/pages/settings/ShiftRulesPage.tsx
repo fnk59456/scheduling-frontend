@@ -82,7 +82,7 @@ export default function ShiftRulesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">排班規則</h1>
+          <h1 className="text-2xl font-bold tracking-tight">排班規則</h1>
           <p className="text-muted-foreground mt-1">設定排班的工時上限、休息規則等約束條件</p>
         </div>
         <Button onClick={openCreate}><Plus className="h-4 w-4 mr-2" />新增規則</Button>
