@@ -4,6 +4,7 @@ import type {
   Certification, Contract, ContractCreateRequest,
   EmployeeAvailability, EmployeeAvailabilityUpdateRequest,
   EmployeeTimeSlot, EmployeeTimeSlotCreateRequest,
+  EmployeeDataConsent, DataConsentCreateRequest,
 } from '@/types/employee'
 import type { PaginatedResponse } from '@/types/api'
 
@@ -68,6 +69,25 @@ export const employeesApi = {
   // 刪除單筆時段
   removeTimeSlot: (employeeId: number, slotId: number) =>
     apiClient.delete(`/employees/employees/${employeeId}/availability/time_slots/${slotId}/`),
+
+  // ===== Data Consent (後端 Phase 2 新增) =====
+  // 204 = 尚無同意紀錄；200 + is_active:false = 已撤回
+  getDataConsent: (employeeId: number) =>
+    apiClient
+      .get<EmployeeDataConsent>(`/employees/employees/${employeeId}/data-consent/`, {
+        validateStatus: (s) => s === 200 || s === 204,
+      })
+      .then((r) => (r.status === 204 ? null : r.data)),
+
+  createDataConsent: (employeeId: number, data?: DataConsentCreateRequest) =>
+    apiClient
+      .post<EmployeeDataConsent>(`/employees/employees/${employeeId}/data-consent/`, data ?? {})
+      .then((r) => r.data),
+
+  revokeDataConsent: (employeeId: number) =>
+    apiClient
+      .delete<EmployeeDataConsent>(`/employees/employees/${employeeId}/data-consent/`)
+      .then((r) => r.data),
 }
 
 export const certificationsApi = {

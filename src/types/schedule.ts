@@ -18,6 +18,7 @@ export interface ScheduleVersion {
   approved_at: string | null
   created_by: number | null
   schedule_count: number
+  derived_from: number | null
   created_at: string
   updated_at: string
 }
@@ -98,6 +99,88 @@ export interface ScheduleChange {
   changed_at: string
   approved_by: number | null
   approved_at: string | null
+}
+
+// ===== 合規檢查 (POST /schedules/versions/{id}/check-compliance/) =====
+
+export type ComplianceSeverity = 'hard' | 'soft'
+
+export interface ComplianceViolation {
+  rule: string
+  rule_label: string
+  severity: ComplianceSeverity
+  employee_pk: number
+  employee_code: string
+  employee_name: string
+  schedule_date: string
+  shift_template_id: number | null
+  related_dates: string[]
+  detail: Record<string, unknown>
+}
+
+export interface CheckComplianceRequest {
+  rules?: Record<string, number>
+  soft_rule_types?: string[]
+}
+
+export interface CheckComplianceResult {
+  schedule_version_id: number
+  rules_applied: Record<string, number>
+  soft_rule_types: string[]
+  total_count: number
+  summary_by_rule: Record<string, number>
+  violations: ComplianceViolation[]
+}
+
+// ===== 派生 A (POST /schedules/versions/{B_id}/derive-legal/) =====
+
+export interface DeriveLegalRequest {
+  today?: string
+  time_decay_n?: number
+  drift_weight?: number
+  constraints?: Record<string, number>
+  soft_rule_types?: string[]
+  label?: string
+  consume_token?: boolean
+}
+
+export interface DeriveLegalDiffSummary {
+  cells_in_b: number
+  cells_in_a: number
+  cells_unchanged: number
+  cells_removed_from_b: number
+  cells_added_in_a: number
+}
+
+export interface DeriveLegalCellDiff {
+  employee_id: number
+  date: string
+  shift_id: number
+}
+
+export interface DeriveLegalBilling {
+  billing_mode: string
+  tokens_charged: number
+  period_usage_after: number
+}
+
+export interface DeriveLegalResult {
+  legal_version_id: number
+  derived_from_id: number
+  diff_summary: DeriveLegalDiffSummary
+  removed_cells: DeriveLegalCellDiff[]
+  added_cells: DeriveLegalCellDiff[]
+  billing?: DeriveLegalBilling
+}
+
+// 402 月度上限已滿
+export interface BillingCapExceededError {
+  error: string
+  billing_mode?: string
+  tokens_required?: number
+  current_period_tokens?: number
+  projected_period_tokens?: number
+  monthly_cap_tokens?: number
 }
 
 // ===== 版本比對 (後端 2026-04 修正：differences 從永遠空陣列 → 真實差異) =====

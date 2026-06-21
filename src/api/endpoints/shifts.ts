@@ -6,6 +6,8 @@ import type {
   ShiftRuleCreateRequest,
   ShiftEmployeePriority,
   ShiftEmployeePriorityUpdateItem,
+  TeamConstraint,
+  TeamConstraintCreateRequest,
 } from '@/types/shift'
 import type { PaginatedResponse } from '@/types/api'
 
@@ -54,4 +56,21 @@ export const shiftRulesApi = {
 
   delete: (id: number) =>
     apiClient.delete(`/shifts/rules/${id}/`),
+}
+
+export const teamConstraintsApi = {
+  list: (params?: { organization?: number; shift_template?: number; branch?: string; is_active?: boolean }) =>
+    apiClient.get<PaginatedResponse<TeamConstraint>>('/shifts/team-constraints/', { params }).then((r) => r.data),
+
+  get: (id: number) =>
+    apiClient.get<TeamConstraint>(`/shifts/team-constraints/${id}/`).then((r) => r.data),
+
+  create: (data: TeamConstraintCreateRequest) =>
+    apiClient.post<TeamConstraint>('/shifts/team-constraints/', data).then((r) => r.data),
+
+  update: (id: number, data: Partial<TeamConstraintCreateRequest & { is_active: boolean }>) =>
+    apiClient.patch<TeamConstraint>(`/shifts/team-constraints/${id}/`, data).then((r) => r.data),
+
+  delete: (id: number) =>
+    apiClient.delete(`/shifts/team-constraints/${id}/`),
 }

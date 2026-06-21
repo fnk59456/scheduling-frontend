@@ -109,6 +109,25 @@ export interface ContractCreateRequest {
   notes?: string
 }
 
+// ===== 個資同意 (後端 Phase 2 新增) =====
+
+export type ShiftPatternPreference = 'none' | 'alternating' | 'consecutive'
+
+export interface EmployeeDataConsent {
+  id: number
+  employee: number
+  consented_at: string
+  revoked_at: string | null
+  consent_version: string
+  notes: string
+  is_active: boolean
+}
+
+export interface DataConsentCreateRequest {
+  consent_version?: string
+  notes?: string
+}
+
 // ===== 員工可用性 / 時段設定 (後端 2026-04 新增) =====
 
 export type SlotType = 'blocked' | 'preferred'

@@ -15,12 +15,30 @@ export interface AIScheduleViolation {
   [key: string]: unknown
 }
 
+export interface AIBillingMetadata {
+  consume_token: boolean
+  billing_mode: 'generate' | 'fill_gaps' | 'derive_legal'
+  enforce_labor_law: boolean
+  tokens_charged?: number
+  period_usage_after?: number
+}
+
+export interface AIScheduleMetadata {
+  solver?: string
+  status?: string
+  solve_time_seconds?: number
+  mode?: string
+  time_decay_n?: number
+  billing?: AIBillingMetadata
+  [key: string]: unknown
+}
+
 export interface AIScheduleResult {
   success: boolean
   assignments: AIScheduleAssignment[]
   score: number | null
   violations: AIScheduleViolation[]
-  metadata: Record<string, unknown>
+  metadata: AIScheduleMetadata
   message?: string | null
 }
 
@@ -57,8 +75,15 @@ export interface AIGenerateRequest {
   shift_template_ids?: number[]
   constraints?: AIGenerateConstraints
   preferences?: Record<string, unknown>
-  // 注意：原 `async` 已於 2026-04 後端版本重新命名為 `run_async`
   run_async?: boolean
+  seed_version_id?: number
+  minimize_drift_from_seed?: boolean
+  enforce_labor_law?: boolean
+  consume_token?: boolean
+  soft_rule_types?: string[]
+  time_decay_n?: number
+  today?: string
+  drift_weight?: number
 }
 
 // ----- Optimize -----

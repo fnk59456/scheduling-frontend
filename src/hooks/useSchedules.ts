@@ -4,8 +4,11 @@ import type {
   ScheduleVersionCreateRequest,
   ScheduleCreateRequest,
   ScheduleUpdateRequest,
+  CheckComplianceRequest,
+  DeriveLegalRequest,
 } from '@/types/schedule'
 import { toast } from '@/hooks/use-toast'
+import axios from 'axios'
 
 const VERSIONS_KEY = ['scheduleVersions']
 const SCHEDULES_KEY = ['schedules']
@@ -65,7 +68,7 @@ export function useCreateDualVersions() {
 export function useSchedules(params?: { version?: number; employee?: number; date_from?: string; date_to?: string }) {
   return useQuery({
     queryKey: [...SCHEDULES_KEY, params],
-    queryFn: () => schedulesApi.list(params),
+    queryFn: () => schedulesApi.listAll(params),
     enabled: !!params?.version,
   })
 }
@@ -110,6 +113,53 @@ export function useScheduleChanges(params?: { schedule?: number; change_type?: s
   return useQuery({
     queryKey: [...CHANGES_KEY, params],
     queryFn: () => scheduleChangesApi.list(params),
+  })
+}
+
+export function useCheckCompliance() {
+  return useMutation({
+    mutationFn: ({ versionId, body }: { versionId: number; body?: CheckComplianceRequest }) =>
+      scheduleVersionsApi.checkCompliance(versionId, body),
+    onError: () => toast({ title: '合規檢查失敗', description: '無法完成合規檢查', variant: 'destructive' }),
+  })
+}
+
+export function useDeriveLegal() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ bVersionId, body }: { bVersionId: number; body?: DeriveLegalRequest }) =>
+      scheduleVersionsApi.deriveLegal(bVersionId, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: VERSIONS_KEY })
+      toast({ title: '派生成功', description: '已產生法規版 (A) 班表' })
+    },
+    onError: (err) => {
+      if (axios.isAxiosError(err)) {
+        const status = err.response?.status
+        const data = err.response?.data as Record<string, unknown> | undefined
+        if (status === 402) {
+          toast({ title: '用量上限已滿', description: String(data?.error ?? '月度 token 已用完，請至設定調整上限'), variant: 'destructive' })
+          return
+        }
+        if (status === 409) {
+          toast({ title: '無法產生合規班表', description: String(data?.error ?? '勞基法規則無法滿足，請調整人力或規則'), variant: 'destructive' })
+          return
+        }
+      }
+      toast({ title: '派生失敗', description: '無法派生法規版班表', variant: 'destructive' })
+    },
+  })
+}
+
+export function useUpdateScheduleVersion() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Partial<ScheduleVersionCreateRequest & { status: string }> }) =>
+      scheduleVersionsApi.update(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: VERSIONS_KEY })
+    },
+    onError: () => toast({ title: '更新失敗', description: '無法更新版本', variant: 'destructive' }),
   })
 }
 
