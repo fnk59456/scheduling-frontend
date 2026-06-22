@@ -89,6 +89,13 @@ export interface EmployeeCreateRequest {
 }
 
 export interface EmployeeUpdateRequest {
+  user?: {
+    username: string
+    email: string
+    password?: string
+    first_name: string
+    last_name: string
+  }
   employee_id?: string
   organization?: number
   branch?: number

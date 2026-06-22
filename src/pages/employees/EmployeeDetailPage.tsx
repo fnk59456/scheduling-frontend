@@ -16,6 +16,7 @@ import {
   useEmployee, useUpdateEmployee, useAddContract, useAddCertification,
   useRemoveCertification, useCertifications,
 } from '@/hooks/useEmployees'
+import { EmployeeFormDialog } from './EmployeeFormDialog'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import type { ContractType } from '@/types/employee'
@@ -55,6 +56,7 @@ export default function EmployeeDetailPage() {
 
   const [showContractDialog, setShowContractDialog] = useState(false)
   const [showCertDialog, setShowCertDialog] = useState(false)
+  const [showEditDialog, setShowEditDialog] = useState(false)
   const [selectedCert, setSelectedCert] = useState('')
   const [contractForm, setContractForm] = useState({
     contract_type: 'full_time' as ContractType,
@@ -158,7 +160,7 @@ export default function EmployeeDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm">編輯</Button>
+          <Button variant="outline" size="sm" onClick={() => setShowEditDialog(true)}>編輯</Button>
           <Button variant="outline" size="sm" onClick={() => updateEmployee.mutate({ id: employeeId, data: { is_active: !employee.is_active } })}>
             {employee.is_active ? '設為離職' : '設為在職'}
           </Button>
@@ -391,6 +393,12 @@ export default function EmployeeDetailPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <EmployeeFormDialog
+        open={showEditDialog}
+        onOpenChange={setShowEditDialog}
+        employee={employee}
+      />
 
       {/* Add Slot Dialog */}
       <Dialog open={showAddSlot} onOpenChange={setShowAddSlot}>
