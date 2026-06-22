@@ -6,11 +6,13 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+
+# Dependency/cache folders
+node_modules/
 .npm-cache/
 
-node_modules
-.npm-cache/
-dist
+# Build output
+dist/
 dist-ssr
 *.local
 
