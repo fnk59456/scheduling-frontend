@@ -3,6 +3,7 @@ import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebas
 import { auth } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 import { authApi } from '@/api/endpoints/auth'
+import { queryClient } from '@/api/queryClient'
 import { toast } from '@/hooks/use-toast'
 
 type AuthMode = 'firebase' | 'token'
@@ -63,6 +64,7 @@ export function useAuth() {
       setLoading(true)
       if (AUTH_MODE === 'token') {
         const res = await authApi.login({ username: email, password })
+        queryClient.clear()
         setDevApiToken(res.token)
         setUser(res.user)
         toast({ title: '登入成功', description: `歡迎回來，${res.user.first_name || res.user.username}` })
@@ -72,6 +74,7 @@ export function useAuth() {
       if (!auth) throw new Error('Firebase 未初始化（請檢查 VITE_AUTH_MODE / Firebase env）')
       await signInWithEmailAndPassword(auth, email, password)
       const profile = await authApi.getMe()
+      queryClient.clear()
       setUser(profile)
       toast({ title: '登入成功', description: `歡迎回來，${profile.first_name || profile.username}` })
     } catch (error: unknown) {
@@ -86,6 +89,7 @@ export function useAuth() {
   const logout = useCallback(async () => {
     try {
       if (AUTH_MODE === 'token') {
+        queryClient.clear()
         setDevApiToken(null)
         storeLogout()
         toast({ title: '已登出', description: '您已安全登出系統' })
@@ -93,10 +97,12 @@ export function useAuth() {
       }
 
       if (!auth) {
+        queryClient.clear()
         storeLogout()
         return
       }
       await signOut(auth)
+      queryClient.clear()
       storeLogout()
       toast({ title: '已登出', description: '您已安全登出系統' })
     } catch (error: unknown) {

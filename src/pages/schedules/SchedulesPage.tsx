@@ -91,21 +91,22 @@ type WorkflowPhase = 'editing' | 'checking' | 'violations' | 'done'
 
 export default function SchedulesPage() {
   const { data: orgsData } = useOrganizations()
-  const { data: branchesData } = useBranches()
-
-  const organizations = orgsData?.results ?? []
-  const branches = branchesData?.results ?? []
 
   const [orgId, setOrgId] = useState<string>('')
-  const [manualOrgId, setManualOrgId] = useState<string>('')
   const [branchId, setBranchId] = useState<string>('all')
   const [versionId, setVersionId] = useState<string>('none')
 
   const orgIdResolved = useMemo(() => {
-    const v = orgId || manualOrgId
-    const n = Number(v)
+    const n = Number(orgId)
     return Number.isFinite(n) && n > 0 ? n : null
-  }, [orgId, manualOrgId])
+  }, [orgId])
+
+  const { data: branchesData } = useBranches({
+    organization: orgIdResolved ?? undefined,
+  })
+
+  const organizations = orgsData?.results ?? []
+  const branches = branchesData?.results ?? []
 
   const { data: employeesData, isLoading: employeesLoading } = useEmployees({
     is_active: true,
@@ -135,7 +136,6 @@ export default function SchedulesPage() {
   useEffect(() => {
     if (!orgId && organizations.length === 1) {
       setOrgId(String(organizations[0].id))
-      setManualOrgId('')
     }
   }, [orgId, organizations])
 
@@ -477,21 +477,24 @@ export default function SchedulesPage() {
         <CardContent className="grid gap-3 md:grid-cols-3">
           <div className="space-y-1.5">
             <Label>機構（必選）</Label>
-            {organizations.length > 0 ? (
-              <Select value={orgId} onValueChange={(v) => { setOrgId(v); setManualOrgId(''); setVersionId('none') }}>
-                <SelectTrigger><SelectValue placeholder="選擇機構" /></SelectTrigger>
-                <SelectContent>
-                  {organizations.map((o) => <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            ) : (
-              <Input
-                value={manualOrgId}
-                onChange={(e) => { setManualOrgId(e.target.value); setOrgId(''); setVersionId('none') }}
-                placeholder="請輸入機構 ID"
-                inputMode="numeric"
-              />
-            )}
+            <Select
+              value={orgId}
+              onValueChange={(v) => {
+                setOrgId(v)
+                setBranchId('all')
+                setVersionId('none')
+              }}
+              disabled={organizations.length === 0}
+            >
+              <SelectTrigger><SelectValue placeholder="選擇機構" /></SelectTrigger>
+              <SelectContent>
+                {organizations.length === 0 ? (
+                  <SelectItem value="__empty__" disabled>沒有可用機構</SelectItem>
+                ) : (
+                  organizations.map((o) => <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>)
+                )}
+              </SelectContent>
+            </Select>
             {!orgIdResolved && <p className="text-xs text-destructive mt-1">請先指定機構</p>}
           </div>
           <div className="space-y-1.5">

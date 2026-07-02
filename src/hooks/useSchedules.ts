@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { scheduleVersionsApi, schedulesApi, scheduleChangesApi } from '@/api/endpoints/schedules'
+import { parseApiErrorMessage } from '@/api/errors'
 import type {
   ScheduleVersionCreateRequest,
   ScheduleCreateRequest,
@@ -37,7 +38,11 @@ export function useCreateScheduleVersion() {
       qc.invalidateQueries({ queryKey: VERSIONS_KEY })
       toast({ title: '建立成功', description: '排班版本已建立' })
     },
-    onError: () => toast({ title: '建立失敗', description: '無法建立排班版本', variant: 'destructive' }),
+    onError: (err) => toast({
+      title: '建立失敗',
+      description: parseApiErrorMessage(err, '無法建立排班版本'),
+      variant: 'destructive',
+    }),
   })
 }
 
@@ -81,7 +86,11 @@ export function useCreateSchedule() {
       qc.invalidateQueries({ queryKey: SCHEDULES_KEY })
       toast({ title: '新增成功', description: '已新增排班' })
     },
-    onError: () => toast({ title: '新增失敗', description: '無法新增排班', variant: 'destructive' }),
+    onError: (err) => toast({
+      title: '新增失敗',
+      description: parseApiErrorMessage(err, '無法新增排班'),
+      variant: 'destructive',
+    }),
   })
 }
 
@@ -93,7 +102,11 @@ export function useUpdateSchedule() {
       qc.invalidateQueries({ queryKey: SCHEDULES_KEY })
       toast({ title: '更新成功', description: '已更新排班' })
     },
-    onError: () => toast({ title: '更新失敗', description: '無法更新排班', variant: 'destructive' }),
+    onError: (err) => toast({
+      title: '更新失敗',
+      description: parseApiErrorMessage(err, '無法更新排班'),
+      variant: 'destructive',
+    }),
   })
 }
 

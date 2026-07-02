@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { auth } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
+import { queryClient } from '@/api/queryClient'
 
 type AuthMode = 'firebase' | 'token'
 
@@ -46,7 +47,10 @@ apiClient.interceptors.response.use(
             ? error.config.headers.get('Authorization')
             : error.config?.headers?.Authorization) as string | undefined
 
-        if (reqAuth?.startsWith('Token ')) useAuthStore.getState().setDevApiToken(null)
+        if (reqAuth?.startsWith('Token ')) {
+          queryClient.clear()
+          useAuthStore.getState().setDevApiToken(null)
+        }
       }
       return Promise.reject(error)
     }

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { employeesApi, certificationsApi } from '@/api/endpoints/employees'
+import { parseApiErrorMessage } from '@/api/errors'
 import type { EmployeeCreateRequest, EmployeeUpdateRequest, ContractCreateRequest } from '@/types/employee'
 import { toast } from '@/hooks/use-toast'
 
@@ -29,7 +30,11 @@ export function useCreateEmployee() {
       qc.invalidateQueries({ queryKey: EMPLOYEES_KEY })
       toast({ title: '建立成功', description: '員工已成功建立' })
     },
-    onError: () => toast({ title: '建立失敗', description: '無法建立員工', variant: 'destructive' }),
+    onError: (err) => toast({
+      title: '建立失敗',
+      description: parseApiErrorMessage(err, '無法建立員工'),
+      variant: 'destructive',
+    }),
   })
 }
 
@@ -41,7 +46,11 @@ export function useUpdateEmployee() {
       qc.invalidateQueries({ queryKey: EMPLOYEES_KEY })
       toast({ title: '更新成功', description: '員工資料已更新' })
     },
-    onError: () => toast({ title: '更新失敗', description: '無法更新員工', variant: 'destructive' }),
+    onError: (err) => toast({
+      title: '更新失敗',
+      description: parseApiErrorMessage(err, '無法更新員工'),
+      variant: 'destructive',
+    }),
   })
 }
 

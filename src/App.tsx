@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { queryClient } from '@/api/queryClient'
 import { ThemeProvider } from '@/components/providers/ThemeProvider'
 import { MainLayout } from '@/components/layout/MainLayout'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
@@ -22,15 +23,6 @@ import AIAssistantPage from '@/pages/ai/AIAssistantPage'
 import AuditPage from '@/pages/audit/AuditPage'
 import PlaceholderPage from '@/pages/PlaceholderPage'
 import './index.css'
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 5 * 60 * 1000,
-      retry: 1,
-    },
-  },
-})
 
 function App() {
   // 暫時開關：Firebase 部署時可跳過登入介面（避免綁定本地 docker API）
