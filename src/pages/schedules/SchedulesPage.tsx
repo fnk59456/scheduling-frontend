@@ -3,6 +3,7 @@ import axios from 'axios'
 import {
   ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, Settings2,
   CheckCircle, Clock, ShieldCheck, ShieldAlert, ArrowRight, AlertTriangle,
+  Download,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -518,6 +519,124 @@ export default function SchedulesPage() {
     }
   }
 
+  // ===== 匯出 Excel =====
+  const [showExportDialog, setShowExportDialog] = useState(false)
+  const [exportDateFrom, setExportDateFrom] = useState('')
+  const [exportDateTo, setExportDateTo] = useState('')
+  const [exportLoading, setExportLoading] = useState(false)
+
+  const openExport = () => {
+    if (!selectedVersion) return
+    setExportDateFrom(selectedVersion.period_start)
+    setExportDateTo(selectedVersion.period_end)
+    setShowExportDialog(true)
+  }
+
+  const runExport = async () => {
+    if (!selectedVersion) return
+    if (!exportDateFrom || !exportDateTo || exportDateFrom > exportDateTo) {
+      toast({ title: '匯出失敗', description: '請確認起訖日期正確', variant: 'destructive' })
+      return
+    }
+    try {
+      setExportLoading(true)
+      const { results } = await schedulesApi.listAll({
+        version: selectedVersion.id,
+        date_from: exportDateFrom,
+        date_to: exportDateTo,
+      })
+
+      const dates: string[] = []
+      for (let d = parseDate(exportDateFrom); d.getTime() <= parseDate(exportDateTo).getTime(); d = addDays(d, 1)) {
+        dates.push(fmtDate(d))
+      }
+
+      const employeeById = new Map<number, { employee_id: string; user_name: string }>()
+      const cellMap = new Map<string, string[]>()
+      for (const s of results) {
+        employeeById.set(s.employee.id, { employee_id: s.employee.employee_id, user_name: s.employee.user_name })
+        const key = `${s.employee.id}:${s.schedule_date}`
+        const label = `${s.shift_template.name} ${s.shift_template.start_time.slice(0, 5)}-${s.shift_template.end_time.slice(0, 5)}`
+        const arr = cellMap.get(key) ?? []
+        arr.push(label)
+        cellMap.set(key, arr)
+      }
+      const sortedEmployees = Array.from(employeeById.entries()).sort((a, b) =>
+        a[1].employee_id.localeCompare(b[1].employee_id),
+      )
+
+      const { Workbook } = await import('exceljs')
+      const workbook = new Workbook()
+      const sheet = workbook.addWorksheet('班表')
+
+      const totalCols = 2 + dates.length
+      const versionLabel = `${selectedVersion.version_label}（${selectedVersion.version_type === 'legal' ? 'A 法規版' : 'B 實際版'}）`
+      sheet.mergeCells(1, 1, 1, totalCols)
+      const titleCell = sheet.getCell(1, 1)
+      titleCell.value = `${versionLabel}　${exportDateFrom} ~ ${exportDateTo}`
+      titleCell.font = { bold: true, size: 14 }
+      titleCell.alignment = { horizontal: 'center', vertical: 'middle' }
+
+      const borderStyle = { style: 'thin' as const, color: { argb: 'FFCCCCCC' } }
+      const border = { top: borderStyle, bottom: borderStyle, left: borderStyle, right: borderStyle }
+      const weekdayLabels = ['日', '一', '二', '三', '四', '五', '六']
+
+      const headerRow = sheet.getRow(3)
+      headerRow.getCell(1).value = '員工編號'
+      headerRow.getCell(2).value = '姓名'
+      dates.forEach((d, i) => {
+        headerRow.getCell(3 + i).value = `${d}(${weekdayLabels[parseDate(d).getDay()]})`
+      })
+      for (let c = 1; c <= totalCols; c++) {
+        const cell = headerRow.getCell(c)
+        cell.font = { bold: true }
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } }
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+        cell.border = border
+      }
+
+      sortedEmployees.forEach(([empId, emp], idx) => {
+        const row = sheet.getRow(4 + idx)
+        row.getCell(1).value = emp.employee_id
+        row.getCell(2).value = emp.user_name
+        dates.forEach((d, i) => {
+          const shifts = cellMap.get(`${empId}:${d}`) ?? []
+          row.getCell(3 + i).value = shifts.join('\n')
+        })
+        for (let c = 1; c <= totalCols; c++) {
+          const cell = row.getCell(c)
+          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+          cell.border = border
+        }
+      })
+
+      sheet.getColumn(1).width = 12
+      sheet.getColumn(2).width = 14
+      for (let i = 0; i < dates.length; i++) {
+        sheet.getColumn(3 + i).width = 16
+      }
+
+      const buffer = await workbook.xlsx.writeBuffer()
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${selectedVersion.version_label}_${exportDateFrom}_${exportDateTo}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      setShowExportDialog(false)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '無法匯出班表'
+      toast({ title: '匯出失敗', description: msg, variant: 'destructive' })
+    } finally {
+      setExportLoading(false)
+    }
+  }
+
   // ===== 週導航 =====
   const prevWeek = () => {
     const next = addDays(weekStart, -7)
@@ -650,6 +769,11 @@ export default function SchedulesPage() {
             {/* Compare */}
             <Button variant="outline" size="sm" onClick={openCompare} disabled={!selectedVersion}>
               Compare 差異
+            </Button>
+            {/* 匯出 */}
+            <Button variant="outline" size="sm" onClick={openExport} disabled={!selectedVersion}>
+              <Download className="h-4 w-4 mr-2" />
+              匯出
             </Button>
 
             {selectedVersion && (
@@ -1162,6 +1286,47 @@ export default function SchedulesPage() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCompareDialog(false)}>關閉</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== 匯出 Dialog ===== */}
+      <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>匯出班表</DialogTitle>
+            <DialogDescription>
+              匯出 {selectedVersion?.version_label}（{selectedVersion?.version_type === 'legal' ? 'A 法規版' : 'B 實際版'}）指定期間的 Excel 班表，供列印、交接與勞檢對照。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>起始日期</Label>
+              <Input
+                type="date"
+                value={exportDateFrom}
+                min={selectedVersion?.period_start}
+                max={selectedVersion?.period_end}
+                onChange={(e) => setExportDateFrom(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>結束日期</Label>
+              <Input
+                type="date"
+                value={exportDateTo}
+                min={selectedVersion?.period_start}
+                max={selectedVersion?.period_end}
+                onChange={(e) => setExportDateTo(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowExportDialog(false)}>取消</Button>
+            <Button onClick={runExport} disabled={exportLoading}>
+              {exportLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2" />}
+              匯出 Excel
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
