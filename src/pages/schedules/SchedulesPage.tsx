@@ -3,7 +3,7 @@ import axios from 'axios'
 import {
   ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, Settings2,
   CheckCircle, Clock, ShieldCheck, ShieldAlert, ArrowRight, AlertTriangle,
-  Download,
+  CalendarDays, Download,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -39,6 +39,9 @@ import type {
 import { toast } from '@/hooks/use-toast'
 import { scheduleVersionsApi, schedulesApi } from '@/api/endpoints/schedules'
 import { cn } from '@/lib/utils'
+import { EmployeeMonthScheduleDialog } from './EmployeeMonthScheduleDialog'
+import type { EmployeeListItem } from '@/types/employee'
+import type { ScheduleExportLayout } from '@/lib/scheduleExcelExport'
 
 function fmtDate(d: Date) {
   const yyyy = d.getFullYear()
@@ -134,6 +137,9 @@ export default function SchedulesPage() {
   const periodEnd = selectedVersion ? parseDate(selectedVersion.period_end) : null
 
   const [weekStart, setWeekStart] = useState<Date>(() => startOfWeek(new Date()))
+  const [monthScheduleOpen, setMonthScheduleOpen] = useState(false)
+  const [monthScheduleEmployee, setMonthScheduleEmployee] = useState<EmployeeListItem | null>(null)
+  const [monthDialogOrigin, setMonthDialogOrigin] = useState({ x: 0, y: 0 })
 
   useEffect(() => {
     if (!orgId && organizations.length === 1) {
@@ -170,6 +176,16 @@ export default function SchedulesPage() {
   })
 
   const schedules = schedulesData?.results ?? []
+
+  const openEmployeeMonthSchedule = (employee: EmployeeListItem, trigger: HTMLButtonElement) => {
+    const rect = trigger.getBoundingClientRect()
+    setMonthDialogOrigin({
+      x: rect.left + rect.width / 2 - window.innerWidth / 2,
+      y: rect.top + rect.height / 2 - window.innerHeight / 2,
+    })
+    setMonthScheduleEmployee(employee)
+    setMonthScheduleOpen(true)
+  }
 
   const scheduleByEmployeeDate = useMemo(() => {
     const map = new Map<string, Schedule>()
@@ -523,6 +539,7 @@ export default function SchedulesPage() {
   const [showExportDialog, setShowExportDialog] = useState(false)
   const [exportDateFrom, setExportDateFrom] = useState('')
   const [exportDateTo, setExportDateTo] = useState('')
+  const [exportLayout, setExportLayout] = useState<ScheduleExportLayout>('combined')
   const [exportLoading, setExportLoading] = useState(false)
 
   const openExport = () => {
@@ -546,84 +563,23 @@ export default function SchedulesPage() {
         date_to: exportDateTo,
       })
 
-      const dates: string[] = []
-      for (let d = parseDate(exportDateFrom); d.getTime() <= parseDate(exportDateTo).getTime(); d = addDays(d, 1)) {
-        dates.push(fmtDate(d))
-      }
-
-      const employeeById = new Map<number, { employee_id: string; user_name: string }>()
-      const cellMap = new Map<string, string[]>()
-      for (const s of results) {
-        employeeById.set(s.employee.id, { employee_id: s.employee.employee_id, user_name: s.employee.user_name })
-        const key = `${s.employee.id}:${s.schedule_date}`
-        const label = `${s.shift_template.name} ${s.shift_template.start_time.slice(0, 5)}-${s.shift_template.end_time.slice(0, 5)}`
-        const arr = cellMap.get(key) ?? []
-        arr.push(label)
-        cellMap.set(key, arr)
-      }
-      const sortedEmployees = Array.from(employeeById.entries()).sort((a, b) =>
-        a[1].employee_id.localeCompare(b[1].employee_id),
-      )
-
-      const { Workbook } = await import('exceljs')
-      const workbook = new Workbook()
-      const sheet = workbook.addWorksheet('班表')
-
-      const totalCols = 2 + dates.length
       const versionLabel = `${selectedVersion.version_label}（${selectedVersion.version_type === 'legal' ? 'A 法規版' : 'B 實際版'}）`
-      sheet.mergeCells(1, 1, 1, totalCols)
-      const titleCell = sheet.getCell(1, 1)
-      titleCell.value = `${versionLabel}　${exportDateFrom} ~ ${exportDateTo}`
-      titleCell.font = { bold: true, size: 14 }
-      titleCell.alignment = { horizontal: 'center', vertical: 'middle' }
-
-      const borderStyle = { style: 'thin' as const, color: { argb: 'FFCCCCCC' } }
-      const border = { top: borderStyle, bottom: borderStyle, left: borderStyle, right: borderStyle }
-      const weekdayLabels = ['日', '一', '二', '三', '四', '五', '六']
-
-      const headerRow = sheet.getRow(3)
-      headerRow.getCell(1).value = '員工編號'
-      headerRow.getCell(2).value = '姓名'
-      dates.forEach((d, i) => {
-        headerRow.getCell(3 + i).value = `${d}(${weekdayLabels[parseDate(d).getDay()]})`
+      const { createScheduleWorkbook } = await import('@/lib/scheduleExcelExport')
+      const buffer = await createScheduleWorkbook({
+        schedules: results,
+        dateFrom: exportDateFrom,
+        dateTo: exportDateTo,
+        versionLabel,
+        layout: exportLayout,
       })
-      for (let c = 1; c <= totalCols; c++) {
-        const cell = headerRow.getCell(c)
-        cell.font = { bold: true }
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } }
-        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
-        cell.border = border
-      }
-
-      sortedEmployees.forEach(([empId, emp], idx) => {
-        const row = sheet.getRow(4 + idx)
-        row.getCell(1).value = emp.employee_id
-        row.getCell(2).value = emp.user_name
-        dates.forEach((d, i) => {
-          const shifts = cellMap.get(`${empId}:${d}`) ?? []
-          row.getCell(3 + i).value = shifts.join('\n')
-        })
-        for (let c = 1; c <= totalCols; c++) {
-          const cell = row.getCell(c)
-          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
-          cell.border = border
-        }
-      })
-
-      sheet.getColumn(1).width = 12
-      sheet.getColumn(2).width = 14
-      for (let i = 0; i < dates.length; i++) {
-        sheet.getColumn(3 + i).width = 16
-      }
-
-      const buffer = await workbook.xlsx.writeBuffer()
       const blob = new Blob([buffer], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${selectedVersion.version_label}_${exportDateFrom}_${exportDateTo}.xlsx`
+      const layoutLabel = exportLayout === 'combined' ? '整合班表' : '個人工作表'
+      a.download = `${selectedVersion.version_label}_${layoutLabel}_${exportDateFrom}_${exportDateTo}.xlsx`
       document.body.appendChild(a)
       a.click()
       a.remove()
@@ -929,7 +885,7 @@ export default function SchedulesPage() {
                 <tbody>
                   {employees.map((e) => (
                     <tr key={e.id} className="border-b last:border-b-0 hover:bg-muted/20">
-                      <td className="p-3 align-top">
+                      <td className="relative p-3 pr-10 align-top">
                         <div className="flex items-center gap-2">
                           <div className="h-7 w-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-semibold shrink-0">
                             {(e.user_name || e.user.first_name || e.user.username).slice(0, 1)}
@@ -939,6 +895,15 @@ export default function SchedulesPage() {
                             <div className="text-[11px] text-muted-foreground">{e.employee_id} · {e.position}</div>
                           </div>
                         </div>
+                        <button
+                          type="button"
+                          className="absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/70 transition hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                          onClick={(event) => openEmployeeMonthSchedule(e, event.currentTarget)}
+                          title={`查看${e.user_name || e.user.first_name || e.user.username}的月班表`}
+                          aria-label={`查看${e.user_name || e.user.first_name || e.user.username}的月班表`}
+                        >
+                          <CalendarDays className="h-4 w-4" />
+                        </button>
                       </td>
                       {weekDays.map((d) => {
                         const date = fmtDate(d)
@@ -1064,6 +1029,22 @@ export default function SchedulesPage() {
           )}
         </CardContent>
       </Card>
+
+      {monthScheduleEmployee && selectedVersion && (
+        <EmployeeMonthScheduleDialog
+          open={monthScheduleOpen}
+          onOpenChange={setMonthScheduleOpen}
+          employee={monthScheduleEmployee}
+          versionId={selectedVersion.id}
+          versionLabel={`${selectedVersion.version_label}（${selectedVersion.version_type === 'legal' ? 'A 法規版' : 'B 實際版'}）`}
+          periodStart={selectedVersion.period_start}
+          periodEnd={selectedVersion.period_end}
+          initialMonth={weekDays[3]}
+          origin={monthDialogOrigin}
+          templates={templates}
+          violations={complianceResult?.violations ?? []}
+        />
+      )}
 
       {/* ===== 新增版本 Dialog ===== */}
       <Dialog open={showVersionDialog} onOpenChange={setShowVersionDialog}>
@@ -1320,6 +1301,21 @@ export default function SchedulesPage() {
                 onChange={(e) => setExportDateTo(e.target.value)}
               />
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>輸出格式</Label>
+            <Select value={exportLayout} onValueChange={(value) => setExportLayout(value as ScheduleExportLayout)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="combined">整合班表</SelectItem>
+                <SelectItem value="per-employee">個人班表</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {exportLayout === 'combined'
+                ? '適合管理、交接與一次列印；員工之間會以空白列和分頁區隔。'
+                : '適合單獨查看或提供給員工；工作表名稱會使用員工編號與姓名。'}
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowExportDialog(false)}>取消</Button>
