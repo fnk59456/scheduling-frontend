@@ -28,7 +28,7 @@ type EmployeeMonthScheduleDialogProps = {
   violations: ComplianceViolation[]
 }
 
-const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日']
+const weekdayLabels = ['日', '一', '二', '三', '四', '五', '六']
 
 const shiftChipColors = [
   'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-300',
@@ -66,7 +66,7 @@ function addMonths(date: Date, amount: number) {
 function startOfWeek(date: Date) {
   const copy = new Date(date)
   const weekday = copy.getDay()
-  copy.setDate(copy.getDate() + (weekday === 0 ? -6 : 1 - weekday))
+  copy.setDate(copy.getDate() - weekday)
   copy.setHours(0, 0, 0, 0)
   return copy
 }
@@ -250,7 +250,7 @@ export function EmployeeMonthScheduleDialog({
           <div className="min-w-[720px]">
             <div className="grid grid-cols-7 border-b bg-muted/40">
               {weekdayLabels.map((label, index) => (
-                <div key={label} className={cn('px-2 py-2 text-center text-xs font-semibold', index >= 5 && 'text-primary')}>
+                <div key={label} className={cn('px-2 py-2 text-center text-xs font-semibold', (index === 0 || index === 6) && 'text-primary')}>
                   週{label}
                 </div>
               ))}
@@ -271,7 +271,7 @@ export function EmployeeMonthScheduleDialog({
                     key={dateKey}
                     className={cn(
                       'min-h-24 border-b border-r p-1.5 last:border-r-0',
-                      index % 7 >= 5 && isCurrentMonth && 'bg-primary/[0.025]',
+                      (index % 7 === 0 || index % 7 === 6) && isCurrentMonth && 'bg-primary/[0.025]',
                       !isCurrentMonth && 'bg-muted/20 text-muted-foreground/50',
                       !isWithinVersion && 'bg-muted/30',
                     )}

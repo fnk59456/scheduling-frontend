@@ -25,8 +25,8 @@ type MonthSection = {
   weeks: Date[][]
 }
 
-const weekdayLabels = ['週一', '週二', '週三', '週四', '週五', '週六', '週日']
-const weekdayShortLabels = ['一', '二', '三', '四', '五', '六', '日']
+const weekdayLabels = ['週日', '週一', '週二', '週三', '週四', '週五', '週六']
+const weekdayShortLabels = ['日', '一', '二', '三', '四', '五', '六']
 const shiftFills = ['FFEAF3FF', 'FFFFF4DC', 'FFF2ECFF', 'FFE8F7F2', 'FFFFEAF0', 'FFEAF0FF']
 
 const thinBorder = { style: 'thin' as const, color: { argb: 'FFD6DEE8' } }
@@ -52,7 +52,7 @@ function formatDate(date: Date) {
 function startOfWeek(date: Date) {
   const result = new Date(date)
   const weekday = result.getDay()
-  result.setDate(result.getDate() + (weekday === 0 ? -6 : 1 - weekday))
+  result.setDate(result.getDate() - weekday)
   result.setHours(0, 0, 0, 0)
   return result
 }
@@ -249,12 +249,12 @@ function renderEmployeeBlock(
       cell.font = {
         bold: true,
         size: 10,
-        color: { argb: index >= 5 ? 'FF9C3D10' : 'FF334155' },
+        color: { argb: index === 0 || index === 6 ? 'FF9C3D10' : 'FF334155' },
       }
       cell.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: index >= 5 ? 'FFFFE8D6' : 'FFEFF3F8' },
+        fgColor: { argb: index === 0 || index === 6 ? 'FFFFE8D6' : 'FFEFF3F8' },
       }
       cell.alignment = { horizontal: 'center', vertical: 'middle' }
       cell.border = calendarBorder
@@ -291,7 +291,7 @@ function renderEmployeeBlock(
           cell.fill = {
             type: 'pattern',
             pattern: 'solid',
-            fgColor: { argb: index >= 5 ? 'FFFFF7ED' : 'FFFFFFFF' },
+            fgColor: { argb: index === 0 || index === 6 ? 'FFFFF7ED' : 'FFFFFFFF' },
           }
           return
         }
