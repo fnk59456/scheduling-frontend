@@ -15,6 +15,7 @@ const ruleTypeLabels: Record<ShiftRuleType, string> = {
   max_consecutive_days: '最大連續工作天數',
   min_rest_hours: '最少休息時數',
   max_weekly_hours: '每週最大工時',
+  max_daily_hours: '每日最大工時',
   mandatory_rest_day: '強制休息日',
 }
 
@@ -22,6 +23,7 @@ const ruleTypeColors: Record<ShiftRuleType, string> = {
   max_consecutive_days: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300',
   min_rest_hours: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
   max_weekly_hours: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300',
+  max_daily_hours: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
   mandatory_rest_day: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
 }
 

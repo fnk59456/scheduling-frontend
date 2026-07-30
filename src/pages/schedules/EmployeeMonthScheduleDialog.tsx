@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useSchedules } from '@/hooks/useSchedules'
 import { cn } from '@/lib/utils'
 import type { EmployeeListItem } from '@/types/employee'
-import type { ComplianceViolation } from '@/types/schedule'
+import type { ComplianceViolation, Schedule } from '@/types/schedule'
 import type { ShiftTemplate } from '@/types/shift'
 
 type DialogOrigin = {
@@ -122,10 +122,16 @@ export function EmployeeMonthScheduleDialog({
   })
 
   const schedules = data?.results ?? []
-  const scheduleByDate = useMemo(
-    () => new Map(schedules.map((schedule) => [schedule.schedule_date, schedule])),
-    [schedules],
-  )
+  const scheduleByDate = useMemo(() => {
+    const map = new Map<string, Schedule[]>()
+    for (const schedule of schedules) {
+      const values = map.get(schedule.schedule_date) ?? []
+      values.push(schedule)
+      values.sort((a, b) => a.shift_template.start_time.localeCompare(b.shift_template.start_time))
+      map.set(schedule.schedule_date, values)
+    }
+    return map
+  }, [schedules])
 
   const templateIndexById = useMemo(
     () => new Map(templates.map((template, index) => [template.id, index])),
@@ -208,7 +214,7 @@ export function EmployeeMonthScheduleDialog({
         <div className="grid grid-cols-3 gap-2 sm:gap-3">
           <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><CalendarDays className="h-3.5 w-3.5" />排班天數</div>
-            <div className="mt-1 text-xl font-bold">{schedules.length}<span className="ml-1 text-xs font-normal text-muted-foreground">天</span></div>
+            <div className="mt-1 text-xl font-bold">{new Set(schedules.map((schedule) => schedule.schedule_date)).size}<span className="ml-1 text-xs font-normal text-muted-foreground">天</span></div>
           </div>
           <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Clock3 className="h-3.5 w-3.5" />預計工時</div>
@@ -260,11 +266,7 @@ export function EmployeeMonthScheduleDialog({
                 const dateKey = formatDate(date)
                 const isCurrentMonth = date.getMonth() === month.getMonth()
                 const isWithinVersion = date >= periodStartDate && date <= periodEndDate
-                const schedule = scheduleByDate.get(dateKey)
-                const templateIndex = schedule ? (templateIndexById.get(schedule.shift_template.id) ?? schedule.shift_template.id) : 0
-                const violation = schedule
-                  ? violationByCell.get(`${dateKey}:${schedule.shift_template.id}`)
-                  : undefined
+                const daySchedules = scheduleByDate.get(dateKey) ?? []
 
                 return (
                   <div
@@ -283,23 +285,33 @@ export function EmployeeMonthScheduleDialog({
                       )}>
                         {date.getDate()}
                       </span>
-                      {violation && <AlertTriangle className={cn('h-3.5 w-3.5', violation.severity === 'hard' ? 'text-destructive' : 'text-amber-500')} />}
+                      {daySchedules.some((schedule) => violationByCell.has(`${dateKey}:${schedule.shift_template.id}`))
+                        && <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />}
                     </div>
 
-                    {isCurrentMonth && isWithinVersion && schedule ? (
-                      <div
-                        className={cn(
-                          'mt-1 rounded-md border px-2 py-1.5',
-                          shiftChipColors[templateIndex % shiftChipColors.length],
-                          violation?.severity === 'hard' && 'border-destructive ring-1 ring-destructive/40',
-                          violation?.severity === 'soft' && 'border-amber-400 ring-1 ring-amber-300/50',
-                        )}
-                        title={violation ? `${violation.rule_label}：${JSON.stringify(violation.detail)}` : undefined}
-                      >
-                        <div className="truncate text-xs font-semibold">{schedule.shift_template.name}</div>
-                        <div className="mt-0.5 whitespace-nowrap font-mono text-[10px] opacity-75">
-                          {schedule.shift_template.start_time.slice(0, 5)}-{schedule.shift_template.end_time.slice(0, 5)}
-                        </div>
+                    {isCurrentMonth && isWithinVersion && daySchedules.length ? (
+                      <div className="mt-1 space-y-1">
+                        {daySchedules.map((schedule) => {
+                          const templateIndex = templateIndexById.get(schedule.shift_template.id) ?? schedule.shift_template.id
+                          const violation = violationByCell.get(`${dateKey}:${schedule.shift_template.id}`)
+                          return (
+                            <div
+                              key={schedule.id}
+                              className={cn(
+                                'rounded-md border px-2 py-1.5',
+                                shiftChipColors[templateIndex % shiftChipColors.length],
+                                violation?.severity === 'hard' && 'border-destructive ring-1 ring-destructive/40',
+                                violation?.severity === 'soft' && 'border-amber-400 ring-1 ring-amber-300/50',
+                              )}
+                              title={violation ? `${violation.rule_label}：${JSON.stringify(violation.detail)}` : undefined}
+                            >
+                              <div className="truncate text-xs font-semibold">{schedule.shift_template.name}</div>
+                              <div className="mt-0.5 whitespace-nowrap font-mono text-[10px] opacity-75">
+                                {schedule.shift_template.start_time.slice(0, 5)}-{schedule.shift_template.end_time.slice(0, 5)}
+                              </div>
+                            </div>
+                          )
+                        })}
                       </div>
                     ) : isCurrentMonth && isWithinVersion ? (
                       <div className="mt-3 text-center text-[10px] text-muted-foreground/70">未排班</div>

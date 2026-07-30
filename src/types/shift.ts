@@ -18,7 +18,7 @@ export interface ShiftTemplate {
   updated_at: string
 }
 
-export type ShiftRuleType = 'max_consecutive_days' | 'min_rest_hours' | 'max_weekly_hours' | 'mandatory_rest_day'
+export type ShiftRuleType = 'max_consecutive_days' | 'min_rest_hours' | 'max_weekly_hours' | 'max_daily_hours' | 'mandatory_rest_day'
 
 export interface ShiftRule {
   id: number

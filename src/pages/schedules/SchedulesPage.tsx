@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import axios from 'axios'
 import {
   ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, Settings2,
   CheckCircle, Clock, ShieldCheck, ShieldAlert, ArrowRight, AlertTriangle,
@@ -14,7 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useOrganizations, useBranches } from '@/hooks/useOrganizations'
 import { useEmployees } from '@/hooks/useEmployees'
-import { useShiftTemplates } from '@/hooks/useShifts'
+import { useShiftRules, useShiftTemplates } from '@/hooks/useShifts'
 import {
   useScheduleVersions,
   useCreateScheduleVersion,
@@ -93,6 +92,23 @@ function violationCellKey(v: ComplianceViolation) {
   return `${v.employee_pk}:${v.schedule_date}:${v.shift_template_id ?? ''}`
 }
 
+function shiftIntervalMinutes(schedule: Schedule) {
+  const [startHour, startMinute] = schedule.shift_template.start_time.split(':').map(Number)
+  const [endHour, endMinute] = schedule.shift_template.end_time.split(':').map(Number)
+  const start = startHour * 60 + startMinute
+  let end = endHour * 60 + endMinute
+  if (end <= start) end += 24 * 60
+  return { start, end }
+}
+
+function numericRuleValue(value: Record<string, unknown>, fallback: number) {
+  for (const key of ['max_hours', 'hours', 'value']) {
+    const parsed = Number(value[key])
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  return fallback
+}
+
 type WorkflowPhase = 'editing' | 'checking' | 'violations' | 'done'
 
 export default function SchedulesPage() {
@@ -125,6 +141,14 @@ export default function SchedulesPage() {
     is_active: true,
   })
   const templates = templatesData?.results ?? []
+  const { data: shiftRulesData } = useShiftRules({
+    organization: orgIdResolved ?? undefined,
+    is_active: true,
+  })
+  const maxDailyHours = useMemo(() => {
+    const rule = shiftRulesData?.results.find((item) => item.rule_type === 'max_daily_hours')
+    return rule ? numericRuleValue(rule.value, 8) : 8
+  }, [shiftRulesData])
 
   // 查所有版本（不依版本類型篩選）
   const { data: versionsData, isLoading: versionsLoading, refetch: refetchVersions } = useScheduleVersions({
@@ -189,12 +213,50 @@ export default function SchedulesPage() {
   }
 
   const scheduleByEmployeeDate = useMemo(() => {
-    const map = new Map<string, Schedule>()
+    const map = new Map<string, Schedule[]>()
     for (const s of schedules) {
-      map.set(`${s.employee.id}:${s.schedule_date}`, s)
+      const key = `${s.employee.id}:${s.schedule_date}`
+      const values = map.get(key) ?? []
+      values.push(s)
+      map.set(key, values)
+    }
+    for (const values of map.values()) {
+      values.sort((a, b) => a.shift_template.start_time.localeCompare(b.shift_template.start_time))
     }
     return map
   }, [schedules])
+
+  const immediateWarningMap = useMemo(() => {
+    const map = new Map<number, string[]>()
+    const add = (schedule: Schedule, message: string) => {
+      const messages = map.get(schedule.id) ?? []
+      if (!messages.includes(message)) messages.push(message)
+      map.set(schedule.id, messages)
+    }
+    for (const daySchedules of scheduleByEmployeeDate.values()) {
+      const totalHours = daySchedules.reduce(
+        (total, schedule) => total + Number(schedule.expected_hours || schedule.shift_template.duration_hours || 0),
+        0,
+      )
+      if (totalHours > maxDailyHours) {
+        daySchedules.forEach((schedule) => add(
+          schedule,
+          `單日工時 ${Math.round(totalHours * 10) / 10} 小時，超過 ${maxDailyHours} 小時`,
+        ))
+      }
+      daySchedules.forEach((schedule, index) => {
+        const current = shiftIntervalMinutes(schedule)
+        daySchedules.slice(index + 1).forEach((nextSchedule) => {
+          const next = shiftIntervalMinutes(nextSchedule)
+          if (current.start < next.end && next.start < current.end) {
+            add(schedule, `與 ${nextSchedule.shift_template.name} 時間重疊`)
+            add(nextSchedule, `與 ${schedule.shift_template.name} 時間重疊`)
+          }
+        })
+      })
+    }
+    return map
+  }, [maxDailyHours, scheduleByEmployeeDate])
 
   const createVersion = useCreateScheduleVersion()
   const approveVersion = useApproveScheduleVersion()
@@ -309,31 +371,6 @@ export default function SchedulesPage() {
 
     if (src.employeeId === targetEmployeeId && src.date === targetDate) return
 
-    // 直接操作 API（繞過 hook 的 toast），統一在這裡控制訊息與錯誤
-    const doSwap = async (targetSchedule: Schedule) => {
-      await schedulesApi.delete(src.id)
-      await schedulesApi.delete(targetSchedule.id)
-      await schedulesApi.create({
-        schedule_version: selectedVersion.id,
-        employee: targetEmployeeId,
-        schedule_date: targetDate,
-        shift_template: src.shiftTemplateId,
-        status: src.status,
-        notes: src.notes,
-        expected_hours: src.expectedHours,
-      })
-      await schedulesApi.create({
-        schedule_version: selectedVersion.id,
-        employee: src.employeeId,
-        schedule_date: src.date,
-        shift_template: targetSchedule.shift_template.id,
-        status: targetSchedule.status,
-        notes: targetSchedule.notes || '',
-        expected_hours: Number(targetSchedule.shift_template.duration_hours ?? 0),
-      })
-      toast({ title: '交換成功', description: '班表已互換' })
-    }
-
     const srcBase = {
       shift_template: src.shiftTemplateId,
       status: src.status,
@@ -342,41 +379,35 @@ export default function SchedulesPage() {
     }
 
     try {
-      const knownTarget = scheduleByEmployeeDate.get(`${targetEmployeeId}:${targetDate}`)
-
-      if (!knownTarget) {
-        // 目標格在快取中看起來是空的，嘗試 PATCH 移動
-        try {
-          await schedulesApi.update(src.id, { ...srcBase, employee: targetEmployeeId, schedule_date: targetDate })
-          toast({ title: '移動成功', description: '班表已移動' })
-        } catch (moveErr) {
-          // 400 unique constraint → 目標格在後端已有資料（快取過期）
-          // 重新抓取最新班表，取得真實目標格後自動改走 swap 路徑
-          if (axios.isAxiosError(moveErr) && moveErr.response?.status === 400) {
-            const freshResult = await refetchSchedules()
-            const freshTarget = (freshResult.data?.results ?? [])
-              .find((s) => s.employee.id === targetEmployeeId && s.schedule_date === targetDate)
-            if (freshTarget) {
-              await doSwap(freshTarget)
-            } else {
-              toast({ title: '移動失敗', description: '班表資料已變更，請重新嘗試', variant: 'destructive' })
-            }
-            resetWorkflow()
-            return
-          }
-          throw moveErr
-        }
-      } else {
-        // 目標格有資料 → 交換
-        // 兩格若含相同班別直接 PATCH 會觸發 unique constraint，改用 delete+create 繞過
-        await doSwap(knownTarget)
+      const targetSchedules = scheduleByEmployeeDate.get(`${targetEmployeeId}:${targetDate}`) ?? []
+      if (targetSchedules.some((schedule) => schedule.shift_template.id === src.shiftTemplateId)) {
+        toast({
+          title: '無法合併相同班別',
+          description: '同一員工、日期與班別不可重複。',
+          variant: 'destructive',
+        })
+        return
       }
 
+      await schedulesApi.update(src.id, {
+        ...srcBase,
+        employee: targetEmployeeId,
+        schedule_date: targetDate,
+      })
+      if (selectedVersion.version_type === 'legal') {
+        await scheduleVersionsApi.update(selectedVersion.id, { version_type: 'actual' })
+        await refetchVersions()
+      }
+      toast({
+        title: targetSchedules.length ? '班次合併成功' : '移動成功',
+        description: targetSchedules.length
+          ? '班次已加入目標日期；如有重疊或超時會顯示警告。'
+          : '班表已移動',
+      })
       resetWorkflow()
-      refetchSchedules()
+      await refetchSchedules()
     } catch {
-      // 部分成功時重新抓取確保畫面與後端一致
-      refetchSchedules()
+      await refetchSchedules()
     }
   }
 
@@ -921,18 +952,8 @@ export default function SchedulesPage() {
                       {weekDays.map((d) => {
                         const date = fmtDate(d)
                         const key = `${e.id}:${date}`
-                        const s = scheduleByEmployeeDate.get(key)
-                        const tplIdx = s ? templates.findIndex((t) => t.id === s.shift_template.id) : -1
-                        const chip = tplIdx >= 0 ? shiftChipColors[tplIdx % shiftChipColors.length] : null
-
-                        // 違規 highlight
-                        const vKey = s ? `${e.id}:${date}:${s.shift_template.id}` : ''
-                        const violation = vKey ? violationMap.get(vKey) : undefined
-                        const isHard = violation?.severity === 'hard'
-                        const isSoft = violation?.severity === 'soft'
-
+                        const cellSchedules = scheduleByEmployeeDate.get(key) ?? []
                         const isDragTarget = dragOver?.employeeId === e.id && dragOver?.date === date
-                        const isDragging = dragSource?.id === s?.id
 
                         return (
                           <td
@@ -947,52 +968,69 @@ export default function SchedulesPage() {
                             }}
                             onDrop={(ev) => { ev.preventDefault(); handleDrop(e.id, date) }}
                           >
-                            {s && chip ? (
-                              <div
-                                draggable
-                                onDragStart={() => setDragSource({
-                                  id: s.id,
-                                  employeeId: e.id,
-                                  date,
-                                  shiftTemplateId: s.shift_template.id,
-                                  status: s.status,
-                                  notes: s.notes || '',
-                                  expectedHours: Number(s.shift_template.duration_hours ?? 0),
+                            {cellSchedules.length ? (
+                              <div className="space-y-1">
+                                {cellSchedules.map((schedule) => {
+                                  const templateIndex = templates.findIndex((t) => t.id === schedule.shift_template.id)
+                                  const chip = shiftChipColors[(templateIndex >= 0 ? templateIndex : 0) % shiftChipColors.length]
+                                  const violation = violationMap.get(`${e.id}:${date}:${schedule.shift_template.id}`)
+                                  const warnings = immediateWarningMap.get(schedule.id) ?? []
+                                  const isHard = violation?.severity === 'hard' || warnings.length > 0
+                                  const isSoft = violation?.severity === 'soft' && warnings.length === 0
+                                  const title = [
+                                    ...warnings,
+                                    ...(violation ? [`${violation.rule_label}：${JSON.stringify(violation.detail)}`] : []),
+                                  ].join('\n')
+                                  return (
+                                    <div
+                                      key={schedule.id}
+                                      draggable
+                                      onDragStart={() => setDragSource({
+                                        id: schedule.id,
+                                        employeeId: e.id,
+                                        date,
+                                        shiftTemplateId: schedule.shift_template.id,
+                                        status: schedule.status,
+                                        notes: schedule.notes || '',
+                                        expectedHours: Number(schedule.expected_hours || schedule.shift_template.duration_hours || 0),
+                                      })}
+                                      onDragEnd={() => { setDragSource(null); setDragOver(null) }}
+                                      className={cn(
+                                        'cursor-grab active:cursor-grabbing',
+                                        dragSource?.id === schedule.id && 'opacity-40',
+                                      )}
+                                    >
+                                      <button
+                                        type="button"
+                                        className={cn(
+                                          'relative w-full rounded-md border px-2 py-2 text-left transition hover:shadow-sm',
+                                          isHard
+                                            ? 'border-destructive bg-destructive/10 ring-1 ring-destructive/30'
+                                            : isSoft
+                                              ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-300/40'
+                                              : `${chip.bg} ${chip.border}`,
+                                        )}
+                                        onClick={() => openEditSchedule(schedule)}
+                                        title={title || undefined}
+                                      >
+                                        <div className="pr-3">
+                                          <div className={cn('truncate text-xs font-semibold', isHard ? 'text-destructive' : isSoft ? 'text-amber-700' : chip.text)}>
+                                            {schedule.shift_template.name}
+                                          </div>
+                                          <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                                            {schedule.shift_template.start_time.slice(0, 5)}-{schedule.shift_template.end_time.slice(0, 5)}
+                                          </div>
+                                        </div>
+                                        {(isHard || isSoft) && (
+                                          <AlertTriangle className={cn(
+                                            'absolute bottom-1.5 right-1.5 h-3 w-3',
+                                            isHard ? 'text-destructive' : 'text-amber-600',
+                                          )} />
+                                        )}
+                                      </button>
+                                    </div>
+                                  )
                                 })}
-                                onDragEnd={() => { setDragSource(null); setDragOver(null) }}
-                                className={cn('cursor-grab active:cursor-grabbing', isDragging && 'opacity-40')}
-                              >
-                                <button
-                                  type="button"
-                                  className={cn(
-                                    'w-full text-left rounded-md border px-2 py-2 transition hover:shadow-sm',
-                                    isHard
-                                      ? 'border-destructive bg-destructive/10 ring-2 ring-destructive/30'
-                                      : isSoft
-                                        ? 'border-amber-400 bg-amber-50 ring-2 ring-amber-300/40'
-                                        : `${chip.bg} ${chip.border}`,
-                                  )}
-                                  onClick={() => openEditSchedule(s)}
-                                  title={violation ? `${violation.rule_label}：${JSON.stringify(violation.detail)}` : undefined}
-                                >
-                                  <div className="flex items-center justify-between gap-1">
-                                    <span className={cn('font-semibold text-xs', isHard ? 'text-destructive' : isSoft ? 'text-amber-700' : chip.text)}>
-                                      {s.shift_template.name}
-                                    </span>
-                                    {isHard ? (
-                                      <AlertTriangle className="h-3 w-3 text-destructive shrink-0" />
-                                    ) : isSoft ? (
-                                      <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0" />
-                                    ) : s.status === 'confirmed' ? (
-                                      <CheckCircle className="h-3 w-3 text-emerald-600 shrink-0" />
-                                    ) : (
-                                      <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
-                                    )}
-                                  </div>
-                                  <div className="text-[10px] text-muted-foreground mt-0.5 font-mono">
-                                    {s.shift_template.start_time.slice(0, 5)}-{s.shift_template.end_time.slice(0, 5)}
-                                  </div>
-                                </button>
                               </div>
                             ) : (
                               <button
