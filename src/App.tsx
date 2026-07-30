@@ -16,6 +16,7 @@ import ShiftRulesPage from '@/pages/settings/ShiftRulesPage'
 import CertificationsPage from '@/pages/settings/CertificationsPage'
 import EmployeePrioritiesPage from '@/pages/settings/EmployeePrioritiesPage'
 import SchedulesPage from '@/pages/schedules/SchedulesPage'
+import ApprovalScheduleSummaryPage from '@/pages/schedules/ApprovalScheduleSummaryPage'
 import AttendancePage from '@/pages/attendance/AttendancePage'
 import OvertimePage from '@/pages/overtime/OvertimePage'
 import CompliancePage from '@/pages/compliance/CompliancePage'
@@ -66,6 +67,7 @@ function App() {
 
                       {/* 後續週次功能佔位 */}
                       <Route path="/schedules" element={<SchedulesPage />} />
+                      <Route path="/schedules/approved" element={<ApprovalScheduleSummaryPage />} />
                       <Route path="/attendance" element={<AttendancePage />} />
                       <Route path="/overtime" element={<OvertimePage />} />
                       <Route path="/compliance" element={<CompliancePage />} />
@@ -98,6 +100,7 @@ function App() {
 
                         {/* 後續週次功能佔位 */}
                         <Route path="/schedules" element={<SchedulesPage />} />
+                        <Route path="/schedules/approved" element={<ApprovalScheduleSummaryPage />} />
                         <Route path="/attendance" element={<AttendancePage />} />
                         <Route path="/overtime" element={<OvertimePage />} />
                         <Route path="/compliance" element={<CompliancePage />} />

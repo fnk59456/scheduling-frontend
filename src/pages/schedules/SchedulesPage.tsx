@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, Settings2,
   CheckCircle, Clock, ShieldCheck, ShieldAlert, ArrowRight, AlertTriangle,
-  CalendarDays, Download,
+  CalendarDays, Download, FileCheck2,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -139,6 +140,7 @@ function numericRuleValue(value: Record<string, unknown>, fallback: number) {
 type WorkflowPhase = 'editing' | 'checking' | 'violations' | 'done'
 
 export default function SchedulesPage() {
+  const navigate = useNavigate()
   const { data: orgsData } = useOrganizations()
 
   const [orgId, setOrgId] = useState<string>('')
@@ -1113,6 +1115,20 @@ export default function SchedulesPage() {
             >
               {approveVersion.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               簽核版本
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const params = new URLSearchParams()
+                if (orgIdResolved) params.set('organization', String(orgIdResolved))
+                if (branchId !== 'all') params.set('branch', branchId)
+                params.set('track', selectedVersion?.version_type ?? 'actual')
+                navigate(`/schedules/approved?${params.toString()}`)
+              }}
+            >
+              <FileCheck2 className="mr-2 h-4 w-4" />
+              簽核總表
             </Button>
             {/* Compare */}
             <Button variant="outline" size="sm" onClick={openCompare} disabled={!selectedVersion}>

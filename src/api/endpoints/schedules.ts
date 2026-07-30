@@ -16,8 +16,15 @@ import type {
 } from '@/types/schedule'
 
 export const scheduleVersionsApi = {
-  list: (params?: { organization?: number; version_type?: string; status?: string; search?: string }) =>
+  list: (params?: { organization?: number; version_type?: string; status?: string; search?: string; page?: number }) =>
     apiClient.get<PaginatedResponse<ScheduleVersion>>('/schedules/versions/', { params }).then((r) => r.data),
+
+  listAll: async (params?: { organization?: number; version_type?: string; status?: string; search?: string }) => {
+    const results = await fetchAllPages<ScheduleVersion>((page) =>
+      scheduleVersionsApi.list({ ...params, page }),
+    )
+    return { count: results.length, next: null, previous: null, results } satisfies PaginatedResponse<ScheduleVersion>
+  },
 
   get: (id: number) =>
     apiClient.get<ScheduleVersion>(`/schedules/versions/${id}/`).then((r) => r.data),
