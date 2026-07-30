@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useQueries } from '@tanstack/react-query'
 import {
   ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, Settings2,
   CheckCircle, Clock, ShieldCheck, ShieldAlert, ArrowRight, AlertTriangle,
@@ -30,6 +31,7 @@ import type {
   Schedule,
   ScheduleCreateRequest,
   ScheduleStatus,
+  ScheduleVersion,
   ScheduleVersionCreateRequest,
   ComplianceViolation,
   CheckComplianceResult,
@@ -39,6 +41,10 @@ import { toast } from '@/hooks/use-toast'
 import { scheduleVersionsApi, schedulesApi } from '@/api/endpoints/schedules'
 import { employeesApi } from '@/api/endpoints/employees'
 import { cn } from '@/lib/utils'
+import {
+  getTimelineVersions,
+  resolveVersionForDate,
+} from '@/lib/scheduleVersionTimeline'
 import { EmployeeMonthScheduleDialog } from './EmployeeMonthScheduleDialog'
 import type { EmployeeListItem } from '@/types/employee'
 import type { ScheduleExportLayout } from '@/lib/scheduleExcelExport'
@@ -70,11 +76,32 @@ function addDays(d: Date, days: number) {
   return x
 }
 
-function clampDate(d: Date, min?: Date, max?: Date) {
-  const t = d.getTime()
-  if (min && t < min.getTime()) return new Date(min)
-  if (max && t > max.getTime()) return new Date(max)
-  return d
+function startOfMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), 1)
+}
+
+function endOfMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0)
+}
+
+function inclusiveDays(start: Date, end: Date) {
+  return Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1
+}
+
+function isWithinPeriod(d: Date, start: Date | null, end: Date | null) {
+  if (!start || !end) return true
+  const time = d.getTime()
+  return time >= start.getTime() && time <= end.getTime()
+}
+
+function buildVersionLabel(start: Date, end: Date) {
+  if (start.getFullYear() === end.getFullYear()) {
+    if (start.getMonth() === end.getMonth()) {
+      return `${start.getFullYear()} ${start.getMonth() + 1}月`
+    }
+    return `${start.getFullYear()} ${start.getMonth() + 1}~${end.getMonth() + 1}月`
+  }
+  return `${start.getFullYear()}/${start.getMonth() + 1}~${end.getFullYear()}/${end.getMonth() + 1}`
 }
 
 const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日']
@@ -162,6 +189,7 @@ export default function SchedulesPage() {
   const periodEnd = selectedVersion ? parseDate(selectedVersion.period_end) : null
 
   const [weekStart, setWeekStart] = useState<Date>(() => startOfWeek(new Date()))
+  const [versionNavigationDate, setVersionNavigationDate] = useState<string | null>(null)
   const [monthScheduleOpen, setMonthScheduleOpen] = useState(false)
   const [monthScheduleEmployee, setMonthScheduleEmployee] = useState<EmployeeListItem | null>(null)
   const [monthDialogOrigin, setMonthDialogOrigin] = useState({ x: 0, y: 0 })
@@ -181,8 +209,16 @@ export default function SchedulesPage() {
 
   useEffect(() => {
     if (!selectedVersion) return
-    const clamped = clampDate(startOfWeek(weekStart), periodStart ?? undefined, periodEnd ?? undefined)
-    setWeekStart(clamped)
+    const requestedDate = versionNavigationDate ? parseDate(versionNavigationDate) : null
+    const initialDate = requestedDate && isWithinPeriod(
+      requestedDate,
+      parseDate(selectedVersion.period_start),
+      parseDate(selectedVersion.period_end),
+    )
+      ? requestedDate
+      : parseDate(selectedVersion.period_start)
+    setWeekStart(startOfWeek(initialDate))
+    setVersionNavigationDate(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedVersion?.id])
 
@@ -201,6 +237,59 @@ export default function SchedulesPage() {
   })
 
   const schedules = schedulesData?.results ?? []
+  const timelineVersions = useMemo(
+    () => getTimelineVersions(versions, selectedVersion, dateFrom, dateTo),
+    [dateFrom, dateTo, selectedVersion, versions],
+  )
+  const adjacentVersions = useMemo(
+    () => timelineVersions.filter((version) => version.id !== selectedVersion?.id),
+    [selectedVersion?.id, timelineVersions],
+  )
+  const adjacentScheduleQueries = useQueries({
+    queries: adjacentVersions.map((version) => ({
+      queryKey: ['schedules', 'timeline', version.id, dateFrom, dateTo],
+      queryFn: () => schedulesApi.listAll({
+        version: version.id,
+        date_from: dateFrom,
+        date_to: dateTo,
+      }),
+    })),
+  })
+  const adjacentSchedules = useMemo(
+    () => adjacentScheduleQueries.flatMap((query) => query.data?.results ?? []),
+    [adjacentScheduleQueries],
+  )
+  const timelineSchedules = useMemo(
+    () => [...schedules, ...adjacentSchedules],
+    [adjacentSchedules, schedules],
+  )
+  const versionResolutionByDate = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof resolveVersionForDate>>()
+    for (const day of weekDays) {
+      const date = fmtDate(day)
+      map.set(date, resolveVersionForDate(
+        timelineVersions,
+        selectedVersion?.id ?? null,
+        date,
+      ))
+    }
+    return map
+  }, [selectedVersion?.id, timelineVersions, weekDays])
+  const visibleOwnerVersions = useMemo(() => {
+    const map = new Map<number, ScheduleVersion>()
+    for (const resolution of versionResolutionByDate.values()) {
+      if (resolution.version) map.set(resolution.version.id, resolution.version)
+    }
+    return [...map.values()].sort((a, b) => a.period_start.localeCompare(b.period_start))
+  }, [versionResolutionByDate])
+  const uncoveredWeekDays = useMemo(
+    () => weekDays.filter((day) => !versionResolutionByDate.get(fmtDate(day))?.version),
+    [versionResolutionByDate, weekDays],
+  )
+  const conflictWeekDays = useMemo(
+    () => weekDays.filter((day) => (versionResolutionByDate.get(fmtDate(day))?.conflicts.length ?? 0) > 1),
+    [versionResolutionByDate, weekDays],
+  )
 
   const openEmployeeMonthSchedule = (employee: EmployeeListItem, trigger: HTMLButtonElement) => {
     const rect = trigger.getBoundingClientRect()
@@ -214,7 +303,9 @@ export default function SchedulesPage() {
 
   const scheduleByEmployeeDate = useMemo(() => {
     const map = new Map<string, Schedule[]>()
-    for (const s of schedules) {
+    for (const s of timelineSchedules) {
+      const owner = versionResolutionByDate.get(s.schedule_date)?.version
+      if (!owner || owner.id !== s.schedule_version) continue
       const key = `${s.employee.id}:${s.schedule_date}`
       const values = map.get(key) ?? []
       values.push(s)
@@ -224,7 +315,7 @@ export default function SchedulesPage() {
       values.sort((a, b) => a.shift_template.start_time.localeCompare(b.shift_template.start_time))
     }
     return map
-  }, [schedules])
+  }, [timelineSchedules, versionResolutionByDate])
 
   const immediateWarningMap = useMemo(() => {
     const map = new Map<number, string[]>()
@@ -279,6 +370,50 @@ export default function SchedulesPage() {
   }
   const [dragSource, setDragSource] = useState<DragSource | null>(null)
   const [dragOver, setDragOver] = useState<{ employeeId: number; date: string } | null>(null)
+  type ContinuationIntent = {
+    date: string
+    employeeId?: number
+    source?: DragSource
+  }
+  const [continuationIntent, setContinuationIntent] = useState<ContinuationIntent | null>(null)
+  const [showContinuationDialog, setShowContinuationDialog] = useState(false)
+  type PendingVersionAction = {
+    versionId: number
+    date: string
+    employeeId?: number
+    schedule?: Schedule
+  }
+  const [pendingVersionAction, setPendingVersionAction] = useState<PendingVersionAction | null>(null)
+
+  const continuationDate = continuationIntent ? parseDate(continuationIntent.date) : null
+  const coveringVersion = useMemo(() => {
+    if (!continuationDate || !selectedVersion) return null
+    const candidates = versions.filter((version) => (
+      version.id !== selectedVersion.id
+      && version.version_type === 'actual'
+      && version.status !== 'archived'
+      && version.organization === selectedVersion.organization
+      && version.branch === selectedVersion.branch
+      && isWithinPeriod(
+        continuationDate,
+        parseDate(version.period_start),
+        parseDate(version.period_end),
+      )
+    ))
+    const statusOrder: Record<ScheduleVersion['status'], number> = {
+      draft: 0,
+      published: 1,
+      approved: 2,
+      archived: 3,
+    }
+    return candidates.sort((a, b) => (
+      statusOrder[a.status] - statusOrder[b.status]
+      || b.created_at.localeCompare(a.created_at)
+    ))[0] ?? null
+  }, [continuationDate, selectedVersion, versions])
+
+  const canExtendSelectedVersion = selectedVersion?.version_type === 'actual'
+    && selectedVersion.status === 'draft'
 
   // ===== 工作流狀態 =====
   const [phase, setPhase] = useState<WorkflowPhase>('editing')
@@ -363,12 +498,8 @@ export default function SchedulesPage() {
   }
 
   // ===== 拖曳 Drop 處理 =====
-  const handleDrop = async (targetEmployeeId: number, targetDate: string) => {
-    if (!dragSource || !selectedVersion) return
-    const src = dragSource
-    setDragSource(null)
-    setDragOver(null)
-
+  const performDrop = async (src: DragSource, targetEmployeeId: number, targetDate: string) => {
+    if (!selectedVersion) return
     if (src.employeeId === targetEmployeeId && src.date === targetDate) return
 
     const srcBase = {
@@ -411,6 +542,49 @@ export default function SchedulesPage() {
     }
   }
 
+  const handleDrop = async (targetEmployeeId: number, targetDate: string) => {
+    if (!dragSource || !selectedVersion) return
+    const src = dragSource
+    setDragSource(null)
+    setDragOver(null)
+
+    if (!isWithinPeriod(parseDate(targetDate), periodStart, periodEnd)) {
+      setContinuationIntent({ date: targetDate, employeeId: targetEmployeeId, source: src })
+      setShowContinuationDialog(true)
+      return
+    }
+    await performDrop(src, targetEmployeeId, targetDate)
+  }
+
+  const handleTimelineDrop = async (
+    ownerVersion: ScheduleVersion | null,
+    hasConflict: boolean,
+    targetEmployeeId: number,
+    targetDate: string,
+  ) => {
+    if (hasConflict) {
+      setDragSource(null)
+      setDragOver(null)
+      toast({
+        title: '版本期間衝突',
+        description: '此日期同時屬於多個版本，請先整理版本期間後再排班。',
+        variant: 'destructive',
+      })
+      return
+    }
+    if (ownerVersion && ownerVersion.id !== selectedVersion?.id) {
+      setDragSource(null)
+      setDragOver(null)
+      toast({
+        title: '不可跨版本拖曳',
+        description: `此日期屬於「${ownerVersion.version_label}」。請先切換版本後再移動班次。`,
+        variant: 'destructive',
+      })
+      return
+    }
+    await handleDrop(targetEmployeeId, targetDate)
+  }
+
   // ===== 建立版本對話框 =====
   const [showVersionDialog, setShowVersionDialog] = useState(false)
   const [versionForm, setVersionForm] = useState({
@@ -420,20 +594,105 @@ export default function SchedulesPage() {
     period_start: '',
     period_end: '',
   })
+  type PeriodPreset = 'same-length' | 'month' | 'four-weeks' | 'custom'
+  const [versionPreset, setVersionPreset] = useState<PeriodPreset>('same-length')
+  const [versionLabelAuto, setVersionLabelAuto] = useState(true)
 
-  const openCreateVersion = () => {
+  const setVersionPeriod = (start: Date, end: Date, preset: PeriodPreset) => {
+    setVersionPreset(preset)
+    setVersionForm((current) => ({
+      ...current,
+      period_start: fmtDate(start),
+      period_end: fmtDate(end),
+      version_label: versionLabelAuto || !current.version_label
+        ? buildVersionLabel(start, end)
+        : current.version_label,
+    }))
+  }
+
+  const openVersionDialog = (start: Date, end: Date, preset: PeriodPreset) => {
     if (!orgIdResolved) {
       toast({ title: '請先指定機構', description: '排班管理必須指定機構後才能建立版本', variant: 'destructive' })
       return
     }
+    setVersionPreset(preset)
+    setVersionLabelAuto(true)
     setVersionForm({
       organization: String(orgIdResolved),
-      branch: branchId !== 'all' ? branchId : '',
-      version_label: '',
-      period_start: '',
-      period_end: '',
+      branch: selectedVersion?.branch
+        ? String(selectedVersion.branch)
+        : branchId !== 'all' ? branchId : '',
+      version_label: buildVersionLabel(start, end),
+      period_start: fmtDate(start),
+      period_end: fmtDate(end),
     })
     setShowVersionDialog(true)
+  }
+
+  const openCreateVersion = () => {
+    if (selectedVersion) {
+      const currentStart = parseDate(selectedVersion.period_start)
+      const currentEnd = parseDate(selectedVersion.period_end)
+      const nextStart = addDays(currentEnd, 1)
+      openVersionDialog(
+        nextStart,
+        addDays(nextStart, inclusiveDays(currentStart, currentEnd) - 1),
+        'same-length',
+      )
+    } else {
+      const monthStart = startOfMonth(weekStart)
+      openVersionDialog(monthStart, endOfMonth(monthStart), 'month')
+    }
+  }
+
+  const openCreateAdjacentVersion = (targetDate: Date) => {
+    if (!selectedVersion) return
+    const currentStart = parseDate(selectedVersion.period_start)
+    const currentEnd = parseDate(selectedVersion.period_end)
+    const duration = inclusiveDays(currentStart, currentEnd)
+    const isBefore = targetDate < currentStart
+    let start = isBefore ? addDays(currentStart, -duration) : addDays(currentEnd, 1)
+    let end = addDays(start, duration - 1)
+    if (targetDate < start || targetDate > end) {
+      start = startOfMonth(targetDate)
+      end = addDays(start, duration - 1)
+    }
+    openVersionDialog(start, end, 'same-length')
+    setShowContinuationDialog(false)
+  }
+
+  const applyPeriodPreset = (preset: PeriodPreset) => {
+    setVersionPreset(preset)
+    if (preset === 'custom') return
+    const start = versionForm.period_start
+      ? parseDate(versionForm.period_start)
+      : startOfMonth(weekStart)
+    if (preset === 'month') {
+      setVersionPeriod(start, endOfMonth(start), preset)
+      return
+    }
+    if (preset === 'four-weeks') {
+      setVersionPeriod(start, addDays(start, 27), preset)
+      return
+    }
+    const duration = selectedVersion
+      ? inclusiveDays(parseDate(selectedVersion.period_start), parseDate(selectedVersion.period_end))
+      : 28
+    setVersionPeriod(start, addDays(start, duration - 1), preset)
+  }
+
+  const updateVersionDate = (field: 'period_start' | 'period_end', value: string) => {
+    setVersionPreset('custom')
+    setVersionForm((current) => {
+      const next = { ...current, [field]: value }
+      if (versionLabelAuto && next.period_start && next.period_end) {
+        next.version_label = buildVersionLabel(
+          parseDate(next.period_start),
+          parseDate(next.period_end),
+        )
+      }
+      return next
+    })
   }
 
   const submitCreateVersion = async (e: React.FormEvent) => {
@@ -493,6 +752,56 @@ export default function SchedulesPage() {
     setShowScheduleDialog(true)
   }
 
+  const requestPeriodContinuation = (
+    date: Date,
+    employeeId?: number,
+    source?: DragSource,
+  ) => {
+    setContinuationIntent({ date: fmtDate(date), employeeId, source })
+    setShowContinuationDialog(true)
+  }
+
+  const switchToCoveringVersion = () => {
+    if (!coveringVersion || !continuationIntent) return
+    setVersionNavigationDate(continuationIntent.date)
+    setVersionId(String(coveringVersion.id))
+    setShowContinuationDialog(false)
+    toast({
+      title: `已切換至 ${coveringVersion.version_label}`,
+      description: `目前版本期間為 ${coveringVersion.period_start} ～ ${coveringVersion.period_end}`,
+    })
+  }
+
+  const extendSelectedVersion = async () => {
+    if (!selectedVersion || !continuationDate || !continuationIntent || !canExtendSelectedVersion) return
+    const currentStart = parseDate(selectedVersion.period_start)
+    const currentEnd = parseDate(selectedVersion.period_end)
+    const newStart = continuationDate < currentStart ? startOfMonth(continuationDate) : currentStart
+    const newEnd = continuationDate > currentEnd ? endOfMonth(continuationDate) : currentEnd
+    await updateVersion.mutateAsync({
+      id: selectedVersion.id,
+      data: {
+        period_start: fmtDate(newStart),
+        period_end: fmtDate(newEnd),
+      },
+    })
+    await refetchVersions()
+    setShowContinuationDialog(false)
+    toast({
+      title: '版本期間已延長',
+      description: `${fmtDate(newStart)} ～ ${fmtDate(newEnd)}`,
+    })
+    if (continuationIntent.source && continuationIntent.employeeId) {
+      await performDrop(
+        continuationIntent.source,
+        continuationIntent.employeeId,
+        continuationIntent.date,
+      )
+    } else if (continuationIntent.employeeId) {
+      openCreateScheduleAt(continuationIntent.employeeId, continuationDate)
+    }
+  }
+
   const openEditSchedule = (s: Schedule) => {
     setEditingSchedule(s)
     setScheduleForm({
@@ -505,11 +814,51 @@ export default function SchedulesPage() {
     setShowScheduleDialog(true)
   }
 
+  const switchVersionForAction = (
+    version: ScheduleVersion,
+    date: string,
+    action?: Omit<PendingVersionAction, 'versionId' | 'date'>,
+  ) => {
+    setVersionNavigationDate(date)
+    setPendingVersionAction(action ? { versionId: version.id, date, ...action } : null)
+    setVersionId(String(version.id))
+    toast({
+      title: `已切換至 ${version.version_label}`,
+      description: action ? '已依目標日期開啟對應版本。' : undefined,
+    })
+  }
+
+  useEffect(() => {
+    if (!pendingVersionAction || selectedVersion?.id !== pendingVersionAction.versionId) return
+    if (pendingVersionAction.schedule) {
+      openEditSchedule(pendingVersionAction.schedule)
+    } else if (pendingVersionAction.employeeId) {
+      openCreateScheduleAt(
+        pendingVersionAction.employeeId,
+        parseDate(pendingVersionAction.date),
+      )
+    }
+    setPendingVersionAction(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingVersionAction, selectedVersion?.id])
+
   const submitSchedule = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedVersion) return
     if (!scheduleForm.employee || !scheduleForm.schedule_date || !scheduleForm.shift_template) {
       toast({ title: '資料不完整', description: '請選擇員工、日期與班別', variant: 'destructive' })
+      return
+    }
+    if (!isWithinPeriod(
+      parseDate(scheduleForm.schedule_date),
+      parseDate(selectedVersion.period_start),
+      parseDate(selectedVersion.period_end),
+    )) {
+      toast({
+        title: '日期不在目前版本期間',
+        description: `請選擇 ${selectedVersion.period_start} ～ ${selectedVersion.period_end} 內的日期，或先延長／建立其他版本。`,
+        variant: 'destructive',
+      })
       return
     }
     const tpl = templates.find((t) => String(t.id) === scheduleForm.shift_template)
@@ -639,17 +988,16 @@ export default function SchedulesPage() {
 
   // ===== 週導航 =====
   const prevWeek = () => {
-    const next = addDays(weekStart, -7)
-    setWeekStart(clampDate(next, periodStart ?? undefined, periodEnd ?? undefined))
+    setWeekStart(addDays(weekStart, -7))
   }
   const nextWeek = () => {
-    const next = addDays(weekStart, 7)
-    setWeekStart(clampDate(next, periodStart ?? undefined, periodEnd ?? undefined))
+    setWeekStart(addDays(weekStart, 7))
   }
-  const canGoPrev = !periodStart || weekStart.getTime() > startOfWeek(periodStart).getTime()
-  const canGoNext = !periodEnd || addDays(weekStart, 6).getTime() < periodEnd.getTime()
 
-  const isBusy = schedulesLoading || employeesLoading || versionsLoading
+  const isBusy = schedulesLoading
+    || adjacentScheduleQueries.some((query) => query.isLoading)
+    || employeesLoading
+    || versionsLoading
 
   const versionBadgeLabel = selectedVersion
     ? selectedVersion.version_type === 'legal'
@@ -891,17 +1239,72 @@ export default function SchedulesPage() {
           <div className="flex items-center justify-between gap-3">
             <CardTitle>週排班表</CardTitle>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={prevWeek} disabled={!canGoPrev}>
+              <Button variant="outline" size="sm" onClick={prevWeek} aria-label="上一週">
                 <ChevronLeft className="h-4 w-4" />
               </Button>
               <div className="text-sm font-medium">{dateFrom} ~ {dateTo}</div>
-              <Button variant="outline" size="sm" onClick={nextWeek} disabled={!canGoNext}>
+              <Button variant="outline" size="sm" onClick={nextWeek} aria-label="下一週">
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </div>
           </div>
         </CardHeader>
         <CardContent>
+          {selectedVersion && visibleOwnerVersions.length > 1 && (
+            <div className="mb-3 flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50/70 px-4 py-3">
+              <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
+              <div>
+                <div className="text-sm font-medium text-blue-900">
+                  本週班表由 {visibleOwnerVersions.length} 個連續版本拼接顯示
+                </div>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {visibleOwnerVersions.map((version) => {
+                    const ownedDates = weekDays
+                      .filter((day) => versionResolutionByDate.get(fmtDate(day))?.version?.id === version.id)
+                      .map(fmtDate)
+                    return (
+                      <Badge key={version.id} variant="outline" className="border-blue-200 bg-background text-blue-800">
+                        {version.version_label}：{ownedDates[0]?.slice(5)}～{ownedDates[ownedDates.length - 1]?.slice(5)}
+                      </Badge>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+          {selectedVersion && conflictWeekDays.length > 0 && (
+            <div className="mb-3 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-destructive">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <div className="text-sm font-medium">本週存在重疊的排班版本</div>
+                <div className="mt-0.5 text-xs opacity-80">
+                  衝突日期：{conflictWeekDays.map((day) => fmtDate(day)).join('、')}。衝突日期暫停編輯，請先整理版本期間。
+                </div>
+              </div>
+            </div>
+          )}
+          {selectedVersion && uncoveredWeekDays.length > 0 && (
+            <div className="mb-3 flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-2">
+                <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                <div>
+                  <div className="text-sm font-medium text-amber-900">本週有日期尚無排班版本</div>
+                  <div className="mt-0.5 text-xs text-amber-800/80">
+                    未涵蓋日期：{uncoveredWeekDays.map((day) => fmtDate(day)).join('、')}。建立或延長版本後才能排班。
+                  </div>
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="shrink-0 border-amber-300 bg-background text-amber-900 hover:bg-amber-100"
+                onClick={() => requestPeriodContinuation(uncoveredWeekDays[0])}
+              >
+                處理版本期間
+              </Button>
+            </div>
+          )}
           {!orgIdResolved ? (
             <div className="py-16 text-center text-muted-foreground">請先指定機構</div>
           ) : !selectedVersion ? (
@@ -916,14 +1319,37 @@ export default function SchedulesPage() {
                 <thead className="sticky top-0 bg-background/95 backdrop-blur border-b">
                   <tr>
                     <th className="text-left p-3 w-56">員工</th>
-                    {weekDays.map((d, idx) => (
-                      <th key={idx} className="text-left p-3 min-w-32">
+                    {weekDays.map((d, idx) => {
+                      const date = fmtDate(d)
+                      const resolution = versionResolutionByDate.get(date)
+                      const ownerVersion = resolution?.version
+                      const previousOwner = idx > 0
+                        ? versionResolutionByDate.get(fmtDate(weekDays[idx - 1]))?.version
+                        : null
+                      const isVersionBoundary = idx > 0 && ownerVersion?.id !== previousOwner?.id
+                      const hasConflict = (resolution?.conflicts.length ?? 0) > 1
+                      return (
+                      <th
+                        key={idx}
+                        className={cn(
+                          'min-w-32 p-3 text-left',
+                          !ownerVersion && 'bg-muted/50 text-muted-foreground',
+                          isVersionBoundary && 'border-l-2 border-l-primary/50',
+                          hasConflict && 'bg-destructive/5',
+                        )}
+                      >
                         <div className="flex items-center justify-between">
                           <span className="font-semibold">週{weekdayLabels[idx]}</span>
-                          <span className="text-xs text-muted-foreground">{fmtDate(d).slice(5)}</span>
+                          <span className="text-xs text-muted-foreground">{date.slice(5)}</span>
+                        </div>
+                        <div className={cn(
+                          'mt-1 truncate text-[10px] font-normal',
+                          ownerVersion ? 'text-primary/75' : 'text-muted-foreground/70',
+                        )}>
+                          {hasConflict ? '版本衝突' : ownerVersion?.version_label ?? '尚無版本'}
                         </div>
                       </th>
-                    ))}
+                    )})}
                   </tr>
                 </thead>
                 <tbody>
@@ -949,24 +1375,39 @@ export default function SchedulesPage() {
                           <CalendarDays className="h-4 w-4" />
                         </button>
                       </td>
-                      {weekDays.map((d) => {
+                      {weekDays.map((d, dayIndex) => {
                         const date = fmtDate(d)
                         const key = `${e.id}:${date}`
                         const cellSchedules = scheduleByEmployeeDate.get(key) ?? []
                         const isDragTarget = dragOver?.employeeId === e.id && dragOver?.date === date
+                        const resolution = versionResolutionByDate.get(date)
+                        const ownerVersion = resolution?.version ?? null
+                        const hasConflict = (resolution?.conflicts.length ?? 0) > 1
+                        const isSelectedOwner = ownerVersion?.id === selectedVersion?.id
+                        const previousOwner = dayIndex > 0
+                          ? versionResolutionByDate.get(fmtDate(weekDays[dayIndex - 1]))?.version
+                          : null
+                        const isVersionBoundary = dayIndex > 0 && ownerVersion?.id !== previousOwner?.id
 
                         return (
                           <td
                             key={date}
                             className={cn(
                               'p-1.5 align-top transition-colors',
+                              !ownerVersion && 'bg-muted/35',
+                              ownerVersion && !isSelectedOwner && 'bg-blue-50/20',
+                              isVersionBoundary && 'border-l-2 border-l-primary/50',
+                              hasConflict && 'bg-destructive/5',
                               isDragTarget && 'bg-primary/10 outline outline-2 outline-primary/40 rounded-md',
                             )}
                             onDragOver={(ev) => { ev.preventDefault(); setDragOver({ employeeId: e.id, date }) }}
                             onDragLeave={(ev) => {
                               if (!ev.currentTarget.contains(ev.relatedTarget as Node)) setDragOver(null)
                             }}
-                            onDrop={(ev) => { ev.preventDefault(); handleDrop(e.id, date) }}
+                            onDrop={(ev) => {
+                              ev.preventDefault()
+                              handleTimelineDrop(ownerVersion, hasConflict, e.id, date)
+                            }}
                           >
                             {cellSchedules.length ? (
                               <div className="space-y-1">
@@ -978,25 +1419,33 @@ export default function SchedulesPage() {
                                   const isHard = violation?.severity === 'hard' || warnings.length > 0
                                   const isSoft = violation?.severity === 'soft' && warnings.length === 0
                                   const title = [
+                                    ...(!isSelectedOwner && ownerVersion
+                                      ? [`來自版本：${ownerVersion.version_label}`]
+                                      : []),
                                     ...warnings,
                                     ...(violation ? [`${violation.rule_label}：${JSON.stringify(violation.detail)}`] : []),
                                   ].join('\n')
                                   return (
                                     <div
                                       key={schedule.id}
-                                      draggable
-                                      onDragStart={() => setDragSource({
-                                        id: schedule.id,
-                                        employeeId: e.id,
-                                        date,
-                                        shiftTemplateId: schedule.shift_template.id,
-                                        status: schedule.status,
-                                        notes: schedule.notes || '',
-                                        expectedHours: Number(schedule.expected_hours || schedule.shift_template.duration_hours || 0),
-                                      })}
+                                      draggable={isSelectedOwner && !hasConflict}
+                                      onDragStart={() => {
+                                        if (!isSelectedOwner || hasConflict) return
+                                        setDragSource({
+                                          id: schedule.id,
+                                          employeeId: e.id,
+                                          date,
+                                          shiftTemplateId: schedule.shift_template.id,
+                                          status: schedule.status,
+                                          notes: schedule.notes || '',
+                                          expectedHours: Number(schedule.expected_hours || schedule.shift_template.duration_hours || 0),
+                                        })
+                                      }}
                                       onDragEnd={() => { setDragSource(null); setDragOver(null) }}
                                       className={cn(
-                                        'cursor-grab active:cursor-grabbing',
+                                        isSelectedOwner && !hasConflict
+                                          ? 'cursor-grab active:cursor-grabbing'
+                                          : 'cursor-pointer',
                                         dragSource?.id === schedule.id && 'opacity-40',
                                       )}
                                     >
@@ -1010,7 +1459,19 @@ export default function SchedulesPage() {
                                               ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-300/40'
                                               : `${chip.bg} ${chip.border}`,
                                         )}
-                                        onClick={() => openEditSchedule(schedule)}
+                                        onClick={() => {
+                                          if (hasConflict) {
+                                            toast({
+                                              title: '版本期間衝突',
+                                              description: '請先整理重疊版本後再編輯此日期。',
+                                              variant: 'destructive',
+                                            })
+                                          } else if (ownerVersion && !isSelectedOwner) {
+                                            switchVersionForAction(ownerVersion, date, { schedule })
+                                          } else {
+                                            openEditSchedule(schedule)
+                                          }
+                                        }}
                                         title={title || undefined}
                                       >
                                         <div className="pr-3">
@@ -1037,13 +1498,41 @@ export default function SchedulesPage() {
                                 type="button"
                                 className={cn(
                                   'w-full rounded-md border border-dashed px-2 py-5 text-muted-foreground hover:bg-muted/40 hover:border-primary/40 transition text-xs',
+                                  !ownerVersion && 'border-muted-foreground/25 bg-muted/20 hover:border-amber-400 hover:bg-amber-50',
+                                  ownerVersion && !isSelectedOwner && 'border-blue-200 bg-blue-50/30 hover:border-blue-400 hover:bg-blue-50',
+                                  hasConflict && 'border-destructive/40 bg-destructive/5 text-destructive',
                                   isDragTarget && 'border-primary border-solid bg-primary/5',
                                 )}
-                                onClick={() => openCreateScheduleAt(e.id, d)}
+                                onClick={() => {
+                                  if (hasConflict) {
+                                    toast({
+                                      title: '版本期間衝突',
+                                      description: '請先整理重疊版本後再指派班次。',
+                                      variant: 'destructive',
+                                    })
+                                  } else if (!ownerVersion) {
+                                    requestPeriodContinuation(d, e.id)
+                                  } else if (!isSelectedOwner) {
+                                    switchVersionForAction(ownerVersion, date, { employeeId: e.id })
+                                  } else {
+                                    openCreateScheduleAt(e.id, d)
+                                  }
+                                }}
                               >
                                 {isDragTarget
-                                  ? <span className="font-medium text-primary">放置於此</span>
-                                  : <><Plus className="h-3 w-3 inline mr-0.5" />指派</>
+                                  ? <span className={cn(
+                                      'font-medium',
+                                      hasConflict || (ownerVersion && !isSelectedOwner)
+                                        ? 'text-destructive'
+                                        : 'text-primary',
+                                    )}>
+                                      {hasConflict || (ownerVersion && !isSelectedOwner) ? '不可跨版本' : '放置於此'}
+                                    </span>
+                                  : hasConflict
+                                    ? <><AlertTriangle className="mr-1 inline h-3 w-3" />版本衝突</>
+                                    : !ownerVersion
+                                      ? <><CalendarDays className="mr-1 inline h-3 w-3" />尚無版本</>
+                                    : <><Plus className="h-3 w-3 inline mr-0.5" />指派</>
                                 }
                               </button>
                             )}
@@ -1094,8 +1583,92 @@ export default function SchedulesPage() {
           origin={monthDialogOrigin}
           templates={templates}
           violations={complianceResult?.violations ?? []}
+          versions={versions}
         />
       )}
+
+      {/* ===== 版本期間外操作 Dialog ===== */}
+      <Dialog open={showContinuationDialog} onOpenChange={setShowContinuationDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>此日期不在目前版本期間</DialogTitle>
+            <DialogDescription>
+              {selectedVersion && continuationIntent
+                ? `目標日期 ${continuationIntent.date}；「${selectedVersion.version_label}」僅涵蓋 ${selectedVersion.period_start} ～ ${selectedVersion.period_end}。`
+                : '請選擇如何繼續。'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {coveringVersion ? (
+            <div className="rounded-lg border bg-muted/30 p-4">
+              <div className="text-sm font-medium">已有班表涵蓋這個日期</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {coveringVersion.version_label} · {coveringVersion.period_start} ～ {coveringVersion.period_end}
+              </div>
+              <Button className="mt-4 w-full" type="button" onClick={switchToCoveringVersion}>
+                切換到這個版本
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {canExtendSelectedVersion && continuationDate && selectedVersion && (
+                <div className="rounded-lg border p-4">
+                  <div className="text-sm font-medium">延長目前 B 草稿</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    期間將延長為{' '}
+                    {continuationDate < parseDate(selectedVersion.period_start)
+                      ? fmtDate(startOfMonth(continuationDate))
+                      : selectedVersion.period_start}
+                    {' '}～{' '}
+                    {continuationDate > parseDate(selectedVersion.period_end)
+                      ? fmtDate(endOfMonth(continuationDate))
+                      : selectedVersion.period_end}
+                  </div>
+                  <Button
+                    className="mt-4 w-full"
+                    type="button"
+                    variant="outline"
+                    disabled={updateVersion.isPending}
+                    onClick={extendSelectedVersion}
+                  >
+                    {updateVersion.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    延長目前版本
+                  </Button>
+                </div>
+              )}
+
+              {continuationDate && (
+                <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
+                  <div className="text-sm font-medium">
+                    建立{selectedVersion && continuationDate < parseDate(selectedVersion.period_start) ? '上一期' : '下一期'}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    預設沿用目前版本長度，日期與版本標籤會自動填入，仍可在下一步調整。
+                  </div>
+                  <Button
+                    className="mt-4 w-full"
+                    type="button"
+                    onClick={() => openCreateAdjacentVersion(continuationDate)}
+                  >
+                    建立新版本
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {continuationIntent?.source && (
+            <p className="text-xs text-muted-foreground">
+              若選擇切換或建立其他版本，原班次不會跨版本移動；只有延長目前草稿時會接續完成本次拖曳。
+            </p>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setShowContinuationDialog(false)}>
+              取消
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ===== 新增版本 Dialog ===== */}
       <Dialog open={showVersionDialog} onOpenChange={setShowVersionDialog}>
@@ -1131,22 +1704,55 @@ export default function SchedulesPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>版本標籤</Label>
+              <Label>版本標籤（自動產生，可修改）</Label>
               <Input
                 value={versionForm.version_label}
-                onChange={(e) => setVersionForm((p) => ({ ...p, version_label: e.target.value }))}
+                onChange={(e) => {
+                  setVersionLabelAuto(false)
+                  setVersionForm((p) => ({ ...p, version_label: e.target.value }))
+                }}
                 placeholder="例：2026/06 第 1 週"
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label>快速設定期間</Label>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {([
+                  ['same-length', '沿用上期長度'],
+                  ['month', '一個月'],
+                  ['four-weeks', '四週'],
+                  ['custom', '自訂'],
+                ] as const).map(([value, label]) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    size="sm"
+                    variant={versionPreset === value ? 'default' : 'outline'}
+                    onClick={() => applyPeriodPreset(value)}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>期間開始</Label>
-                <Input type="date" value={versionForm.period_start} onChange={(e) => setVersionForm((p) => ({ ...p, period_start: e.target.value }))} />
+                <Input
+                  type="date"
+                  value={versionForm.period_start}
+                  onChange={(e) => updateVersionDate('period_start', e.target.value)}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>期間結束</Label>
-                <Input type="date" value={versionForm.period_end} onChange={(e) => setVersionForm((p) => ({ ...p, period_end: e.target.value }))} />
+                <Input
+                  type="date"
+                  value={versionForm.period_end}
+                  onChange={(e) => updateVersionDate('period_end', e.target.value)}
+                />
               </div>
             </div>
 
@@ -1187,7 +1793,13 @@ export default function SchedulesPage() {
               </div>
               <div className="space-y-1.5">
                 <Label>日期</Label>
-                <Input type="date" value={scheduleForm.schedule_date} onChange={(e) => setScheduleForm((p) => ({ ...p, schedule_date: e.target.value }))} />
+                <Input
+                  type="date"
+                  min={selectedVersion?.period_start}
+                  max={selectedVersion?.period_end}
+                  value={scheduleForm.schedule_date}
+                  onChange={(e) => setScheduleForm((p) => ({ ...p, schedule_date: e.target.value }))}
+                />
               </div>
             </div>
 

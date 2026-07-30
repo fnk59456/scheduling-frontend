@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
+import { useQueries } from '@tanstack/react-query'
 import { AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Clock3, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { useSchedules } from '@/hooks/useSchedules'
+import { schedulesApi } from '@/api/endpoints/schedules'
 import { cn } from '@/lib/utils'
+import {
+  getTimelineVersions,
+  resolveVersionForDate,
+} from '@/lib/scheduleVersionTimeline'
 import type { EmployeeListItem } from '@/types/employee'
-import type { ComplianceViolation, Schedule } from '@/types/schedule'
+import type { ComplianceViolation, Schedule, ScheduleVersion } from '@/types/schedule'
 import type { ShiftTemplate } from '@/types/shift'
 
 type DialogOrigin = {
@@ -26,6 +31,7 @@ type EmployeeMonthScheduleDialogProps = {
   origin: DialogOrigin
   templates: ShiftTemplate[]
   violations: ComplianceViolation[]
+  versions: ScheduleVersion[]
 }
 
 const weekdayLabels = ['日', '一', '二', '三', '四', '五', '六']
@@ -38,11 +44,6 @@ const shiftChipColors = [
   'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-300',
   'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300',
 ]
-
-function parseDate(value: string) {
-  const [year, month, day] = value.split('-').map(Number)
-  return new Date(year, month - 1, day)
-}
 
 function formatDate(date: Date) {
   const year = date.getFullYear()
@@ -71,15 +72,6 @@ function startOfWeek(date: Date) {
   return copy
 }
 
-function clampMonth(date: Date, periodStart: Date, periodEnd: Date) {
-  const month = startOfMonth(date)
-  const firstMonth = startOfMonth(periodStart)
-  const lastMonth = startOfMonth(periodEnd)
-  if (month < firstMonth) return firstMonth
-  if (month > lastMonth) return lastMonth
-  return month
-}
-
 function employeeName(employee: EmployeeListItem) {
   return employee.user_name
     || `${employee.user.first_name} ${employee.user.last_name}`.trim()
@@ -98,30 +90,79 @@ export function EmployeeMonthScheduleDialog({
   origin,
   templates,
   violations,
+  versions,
 }: EmployeeMonthScheduleDialogProps) {
-  const periodStartDate = useMemo(() => parseDate(periodStart), [periodStart])
-  const periodEndDate = useMemo(() => parseDate(periodEnd), [periodEnd])
-  const [month, setMonth] = useState(() => clampMonth(initialMonth, periodStartDate, periodEndDate))
+  const [month, setMonth] = useState(() => startOfMonth(initialMonth))
 
   useEffect(() => {
     if (open) {
-      setMonth(clampMonth(initialMonth, periodStartDate, periodEndDate))
+      setMonth(startOfMonth(initialMonth))
     }
-  }, [employee.id, initialMonth, open, periodEndDate, periodStartDate])
+  }, [employee.id, initialMonth, open])
 
   const monthStart = useMemo(() => startOfMonth(month), [month])
   const monthEnd = useMemo(() => endOfMonth(month), [month])
-  const queryStart = monthStart < periodStartDate ? periodStartDate : monthStart
-  const queryEnd = monthEnd > periodEndDate ? periodEndDate : monthEnd
-
-  const { data, isLoading, isFetching, isError, refetch } = useSchedules({
-    version: open ? versionId : undefined,
-    employee: open ? employee.id : undefined,
-    date_from: open ? formatDate(queryStart) : undefined,
-    date_to: open ? formatDate(queryEnd) : undefined,
+  const calendarDays = useMemo(() => {
+    const firstVisibleDay = startOfWeek(monthStart)
+    return Array.from({ length: 42 }, (_, index) => {
+      const date = new Date(firstVisibleDay)
+      date.setDate(firstVisibleDay.getDate() + index)
+      return date
+    })
+  }, [monthStart])
+  const calendarStart = calendarDays[0]
+  const calendarEnd = calendarDays[calendarDays.length - 1]
+  const selectedVersion = useMemo(
+    () => versions.find((version) => version.id === versionId) ?? null,
+    [versionId, versions],
+  )
+  const timelineVersions = useMemo(
+    () => getTimelineVersions(
+      versions,
+      selectedVersion,
+      formatDate(calendarStart),
+      formatDate(calendarEnd),
+    ),
+    [calendarEnd, calendarStart, selectedVersion, versions],
+  )
+  const scheduleQueries = useQueries({
+    queries: open
+      ? timelineVersions.map((version) => ({
+          queryKey: [
+            'schedules',
+            'employee-month-timeline',
+            version.id,
+            employee.id,
+            formatDate(calendarStart),
+            formatDate(calendarEnd),
+          ],
+          queryFn: () => schedulesApi.listAll({
+            version: version.id,
+            employee: employee.id,
+            date_from: formatDate(calendarStart),
+            date_to: formatDate(calendarEnd),
+          }),
+        }))
+      : [],
   })
-
-  const schedules = data?.results ?? []
+  const rawSchedules = useMemo(
+    () => scheduleQueries.flatMap((query) => query.data?.results ?? []),
+    [scheduleQueries],
+  )
+  const schedules = useMemo(
+    () => rawSchedules.filter((schedule) => (
+      resolveVersionForDate(
+        timelineVersions,
+        selectedVersion?.id ?? null,
+        schedule.schedule_date,
+      ).version?.id === schedule.schedule_version
+    )),
+    [rawSchedules, selectedVersion?.id, timelineVersions],
+  )
+  const isLoading = scheduleQueries.some((query) => query.isLoading)
+  const isFetching = scheduleQueries.some((query) => query.isFetching)
+  const isError = scheduleQueries.some((query) => query.isError)
+  const refetch = () => Promise.all(scheduleQueries.map((query) => query.refetch()))
   const scheduleByDate = useMemo(() => {
     const map = new Map<string, Schedule[]>()
     for (const schedule of schedules) {
@@ -132,25 +173,39 @@ export function EmployeeMonthScheduleDialog({
     }
     return map
   }, [schedules])
+  const monthSchedules = useMemo(() => {
+    const from = formatDate(monthStart)
+    const to = formatDate(monthEnd)
+    return schedules.filter((schedule) => (
+      schedule.schedule_date >= from && schedule.schedule_date <= to
+    ))
+  }, [monthEnd, monthStart, schedules])
 
   const templateIndexById = useMemo(
     () => new Map(templates.map((template, index) => [template.id, index])),
     [templates],
   )
 
-  const relevantViolations = useMemo(() => {
-    const from = formatDate(monthStart)
-    const to = formatDate(monthEnd)
+  const visibleViolations = useMemo(() => {
+    const from = formatDate(calendarStart)
+    const to = formatDate(calendarEnd)
     return violations.filter((violation) => (
       violation.employee_pk === employee.id
       && violation.schedule_date >= from
       && violation.schedule_date <= to
     ))
-  }, [employee.id, monthEnd, monthStart, violations])
+  }, [calendarEnd, calendarStart, employee.id, violations])
+  const relevantViolations = useMemo(() => {
+    const from = formatDate(monthStart)
+    const to = formatDate(monthEnd)
+    return visibleViolations.filter((violation) => (
+      violation.schedule_date >= from && violation.schedule_date <= to
+    ))
+  }, [monthEnd, monthStart, visibleViolations])
 
   const violationByCell = useMemo(() => {
     const map = new Map<string, ComplianceViolation>()
-    for (const violation of relevantViolations) {
+    for (const violation of visibleViolations) {
       const key = `${violation.schedule_date}:${violation.shift_template_id ?? ''}`
       const existing = map.get(key)
       if (!existing || (existing.severity === 'soft' && violation.severity === 'hard')) {
@@ -158,31 +213,50 @@ export function EmployeeMonthScheduleDialog({
       }
     }
     return map
-  }, [relevantViolations])
-
-  const calendarDays = useMemo(() => {
-    const firstVisibleDay = startOfWeek(monthStart)
-    return Array.from({ length: 42 }, (_, index) => {
-      const date = new Date(firstVisibleDay)
-      date.setDate(firstVisibleDay.getDate() + index)
-      return date
-    })
-  }, [monthStart])
+  }, [visibleViolations])
+  const versionResolutionByDate = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof resolveVersionForDate>>()
+    for (const day of calendarDays) {
+      const date = formatDate(day)
+      map.set(date, resolveVersionForDate(
+        timelineVersions,
+        selectedVersion?.id ?? null,
+        date,
+      ))
+    }
+    return map
+  }, [calendarDays, selectedVersion?.id, timelineVersions])
+  const visibleOwnerVersions = useMemo(() => {
+    const map = new Map<number, ScheduleVersion>()
+    for (const day of calendarDays) {
+      const owner = versionResolutionByDate.get(formatDate(day))?.version
+      if (owner) map.set(owner.id, owner)
+    }
+    return [...map.values()].sort((a, b) => a.period_start.localeCompare(b.period_start))
+  }, [calendarDays, versionResolutionByDate])
+  const conflictDates = useMemo(
+    () => calendarDays
+      .filter((day) => (
+        (versionResolutionByDate.get(formatDate(day))?.conflicts.length ?? 0) > 1
+      ))
+      .map(formatDate),
+    [calendarDays, versionResolutionByDate],
+  )
 
   const totalHours = useMemo(
-    () => schedules.reduce((total, schedule) => {
+    () => monthSchedules.reduce((total, schedule) => {
       const hours = Number(schedule.expected_hours || schedule.shift_template.duration_hours || 0)
       return total + (Number.isFinite(hours) ? hours : 0)
     }, 0),
-    [schedules],
+    [monthSchedules],
   )
 
   const todayKey = formatDate(new Date())
   const monthLabel = new Intl.DateTimeFormat('zh-TW', { year: 'numeric', month: 'long' }).format(month)
-  const firstAllowedMonth = startOfMonth(periodStartDate)
-  const lastAllowedMonth = startOfMonth(periodEndDate)
-  const canGoPrevious = monthStart > firstAllowedMonth
-  const canGoNext = monthStart < lastAllowedMonth
+  const monthHasVersion = timelineVersions.some((version) => (
+    version.period_start <= formatDate(monthEnd)
+    && version.period_end >= formatDate(monthStart)
+  ))
   const name = employeeName(employee)
 
   const dialogStyle = {
@@ -214,7 +288,7 @@ export function EmployeeMonthScheduleDialog({
         <div className="grid grid-cols-3 gap-2 sm:gap-3">
           <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><CalendarDays className="h-3.5 w-3.5" />排班天數</div>
-            <div className="mt-1 text-xl font-bold">{new Set(schedules.map((schedule) => schedule.schedule_date)).size}<span className="ml-1 text-xs font-normal text-muted-foreground">天</span></div>
+            <div className="mt-1 text-xl font-bold">{new Set(monthSchedules.map((schedule) => schedule.schedule_date)).size}<span className="ml-1 text-xs font-normal text-muted-foreground">天</span></div>
           </div>
           <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Clock3 className="h-3.5 w-3.5" />預計工時</div>
@@ -232,8 +306,7 @@ export function EmployeeMonthScheduleDialog({
             variant="outline"
             size="sm"
             className="h-9 w-9 p-0"
-            disabled={!canGoPrevious}
-            onClick={() => setMonth((current) => clampMonth(addMonths(current, -1), periodStartDate, periodEndDate))}
+            onClick={() => setMonth((current) => addMonths(current, -1))}
             aria-label="查看上個月"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -244,13 +317,54 @@ export function EmployeeMonthScheduleDialog({
             variant="outline"
             size="sm"
             className="h-9 w-9 p-0"
-            disabled={!canGoNext}
-            onClick={() => setMonth((current) => clampMonth(addMonths(current, 1), periodStartDate, periodEndDate))}
+            onClick={() => setMonth((current) => addMonths(current, 1))}
             aria-label="查看下個月"
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
+
+        {visibleOwnerVersions.length > 1 && (
+          <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50/70 px-4 py-3 text-blue-900">
+            <CalendarDays className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <div className="text-sm font-medium">
+                本頁月曆由 {visibleOwnerVersions.length} 個連續版本拼接顯示
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1.5 text-xs text-blue-800/80">
+                {visibleOwnerVersions.map((version) => (
+                  <span key={version.id} className="rounded-full border border-blue-200 bg-background px-2 py-0.5">
+                    {version.version_label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {conflictDates.length > 0 && (
+          <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-destructive">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <div className="text-sm font-medium">本月存在重疊的排班版本</div>
+              <div className="mt-0.5 text-xs opacity-80">
+                衝突日期：{conflictDates.join('、')}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!monthHasVersion && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-3 text-amber-900">
+            <CalendarDays className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <div className="text-sm font-medium">此月份尚無排班版本</div>
+              <div className="mt-0.5 text-xs text-amber-800/80">
+                目前操作版本為「{versionLabel}」（{periodStart} ～ {periodEnd}）；此月份僅供瀏覽。
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="relative overflow-x-auto rounded-xl border bg-background">
           <div className="min-w-[720px]">
@@ -265,7 +379,13 @@ export function EmployeeMonthScheduleDialog({
               {calendarDays.map((date, index) => {
                 const dateKey = formatDate(date)
                 const isCurrentMonth = date.getMonth() === month.getMonth()
-                const isWithinVersion = date >= periodStartDate && date <= periodEndDate
+                const resolution = versionResolutionByDate.get(dateKey)
+                const ownerVersion = resolution?.version
+                const hasConflict = (resolution?.conflicts.length ?? 0) > 1
+                const previousOwner = index > 0
+                  ? versionResolutionByDate.get(formatDate(calendarDays[index - 1]))?.version
+                  : null
+                const isVersionBoundary = index > 0 && ownerVersion?.id !== previousOwner?.id
                 const daySchedules = scheduleByDate.get(dateKey) ?? []
 
                 return (
@@ -275,7 +395,9 @@ export function EmployeeMonthScheduleDialog({
                       'min-h-24 border-b border-r p-1.5 last:border-r-0',
                       (index % 7 === 0 || index % 7 === 6) && isCurrentMonth && 'bg-primary/[0.025]',
                       !isCurrentMonth && 'bg-muted/20 text-muted-foreground/50',
-                      !isWithinVersion && 'bg-muted/30',
+                      !ownerVersion && 'bg-muted/30',
+                      isVersionBoundary && 'border-l-2 border-l-primary/50',
+                      hasConflict && 'bg-destructive/5',
                     )}
                   >
                     <div className="flex items-center justify-between px-0.5">
@@ -289,8 +411,8 @@ export function EmployeeMonthScheduleDialog({
                         && <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />}
                     </div>
 
-                    {isCurrentMonth && isWithinVersion && daySchedules.length ? (
-                      <div className="mt-1 space-y-1">
+                    {ownerVersion && !hasConflict && daySchedules.length ? (
+                      <div className={cn('mt-1 space-y-1', !isCurrentMonth && 'opacity-70')}>
                         {daySchedules.map((schedule) => {
                           const templateIndex = templateIndexById.get(schedule.shift_template.id) ?? schedule.shift_template.id
                           const violation = violationByCell.get(`${dateKey}:${schedule.shift_template.id}`)
@@ -303,7 +425,10 @@ export function EmployeeMonthScheduleDialog({
                                 violation?.severity === 'hard' && 'border-destructive ring-1 ring-destructive/40',
                                 violation?.severity === 'soft' && 'border-amber-400 ring-1 ring-amber-300/50',
                               )}
-                              title={violation ? `${violation.rule_label}：${JSON.stringify(violation.detail)}` : undefined}
+                              title={[
+                                ownerVersion.id !== versionId ? `來自版本：${ownerVersion.version_label}` : '',
+                                violation ? `${violation.rule_label}：${JSON.stringify(violation.detail)}` : '',
+                              ].filter(Boolean).join('\n') || undefined}
                             >
                               <div className="truncate text-xs font-semibold">{schedule.shift_template.name}</div>
                               <div className="mt-0.5 whitespace-nowrap font-mono text-[10px] opacity-75">
@@ -313,8 +438,12 @@ export function EmployeeMonthScheduleDialog({
                           )
                         })}
                       </div>
-                    ) : isCurrentMonth && isWithinVersion ? (
+                    ) : hasConflict ? (
+                      <div className="mt-3 text-center text-[10px] text-destructive">版本衝突</div>
+                    ) : isCurrentMonth && ownerVersion ? (
                       <div className="mt-3 text-center text-[10px] text-muted-foreground/70">未排班</div>
+                    ) : isCurrentMonth && !ownerVersion ? (
+                      <div className="mt-3 text-center text-[10px] text-muted-foreground/55">尚無版本</div>
                     ) : null}
                   </div>
                 )
@@ -339,7 +468,7 @@ export function EmployeeMonthScheduleDialog({
         </div>
 
         <p className="text-center text-xs text-muted-foreground">
-          僅顯示此排班版本有效期間內的資料；未排班不代表已核准休假。
+          連續瀏覽會拼接同一分店、同一軌的相鄰版本；未排班不代表已核准休假。
         </p>
       </DialogContent>
     </Dialog>
