@@ -7,10 +7,20 @@ import type {
   EmployeeDataConsent, DataConsentCreateRequest,
 } from '@/types/employee'
 import type { PaginatedResponse } from '@/types/api'
+import { fetchAllPages } from '@/api/pagination'
 
 export const employeesApi = {
   list: (params?: { search?: string; is_active?: boolean; organization?: number; branch?: number; certification?: number }) =>
     apiClient.get<PaginatedResponse<EmployeeListItem>>('/employees/employees/', { params }).then((r) => r.data),
+
+  listAll: async (params?: { search?: string; is_active?: boolean; organization?: number; branch?: number; certification?: number }) => {
+    const results = await fetchAllPages<EmployeeListItem>((page) =>
+      apiClient
+        .get<PaginatedResponse<EmployeeListItem>>('/employees/employees/', { params: { ...params, page } })
+        .then((r) => r.data),
+    )
+    return { count: results.length, next: null, previous: null, results } satisfies PaginatedResponse<EmployeeListItem>
+  },
 
   get: (id: number) =>
     apiClient.get<Employee>(`/employees/employees/${id}/`).then((r) => r.data),

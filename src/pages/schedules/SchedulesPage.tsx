@@ -38,6 +38,7 @@ import type {
 } from '@/types/schedule'
 import { toast } from '@/hooks/use-toast'
 import { scheduleVersionsApi, schedulesApi } from '@/api/endpoints/schedules'
+import { employeesApi } from '@/api/endpoints/employees'
 import { cn } from '@/lib/utils'
 import { EmployeeMonthScheduleDialog } from './EmployeeMonthScheduleDialog'
 import type { EmployeeListItem } from '@/types/employee'
@@ -539,7 +540,7 @@ export default function SchedulesPage() {
   const [showExportDialog, setShowExportDialog] = useState(false)
   const [exportDateFrom, setExportDateFrom] = useState('')
   const [exportDateTo, setExportDateTo] = useState('')
-  const [exportLayout, setExportLayout] = useState<ScheduleExportLayout>('combined')
+  const [exportLayout, setExportLayout] = useState<ScheduleExportLayout>('personal')
   const [exportLoading, setExportLoading] = useState(false)
 
   const openExport = () => {
@@ -557,16 +558,28 @@ export default function SchedulesPage() {
     }
     try {
       setExportLoading(true)
-      const { results } = await schedulesApi.listAll({
-        version: selectedVersion.id,
-        date_from: exportDateFrom,
-        date_to: exportDateTo,
-      })
+      const [scheduleResponse, employeeResponse] = await Promise.all([
+        schedulesApi.listAll({
+          version: selectedVersion.id,
+          date_from: exportDateFrom,
+          date_to: exportDateTo,
+        }),
+        exportLayout === 'integrated'
+          ? employeesApi.listAll({
+              is_active: true,
+              organization: selectedVersion.organization,
+              branch: branchId === 'all'
+                ? (selectedVersion.branch ?? undefined)
+                : Number(branchId),
+            })
+          : Promise.resolve(null),
+      ])
 
       const versionLabel = `${selectedVersion.version_label}（${selectedVersion.version_type === 'legal' ? 'A 法規版' : 'B 實際版'}）`
       const { createScheduleWorkbook } = await import('@/lib/scheduleExcelExport')
       const buffer = await createScheduleWorkbook({
-        schedules: results,
+        schedules: scheduleResponse.results,
+        employees: employeeResponse?.results,
         dateFrom: exportDateFrom,
         dateTo: exportDateTo,
         versionLabel,
@@ -578,7 +591,7 @@ export default function SchedulesPage() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      const layoutLabel = exportLayout === 'combined' ? '整合班表' : '個人工作表'
+      const layoutLabel = exportLayout === 'personal' ? '個人版表' : '整合班表'
       a.download = `${selectedVersion.version_label}_${layoutLabel}_${exportDateFrom}_${exportDateTo}.xlsx`
       document.body.appendChild(a)
       a.click()
@@ -1307,14 +1320,14 @@ export default function SchedulesPage() {
             <Select value={exportLayout} onValueChange={(value) => setExportLayout(value as ScheduleExportLayout)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="combined">整合班表</SelectItem>
-                <SelectItem value="per-employee">個人班表</SelectItem>
+                <SelectItem value="personal">個人版表</SelectItem>
+                <SelectItem value="integrated">整合班表</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              {exportLayout === 'combined'
-                ? '適合管理、交接與一次列印；員工之間會以空白列和分頁區隔。'
-                : '適合單獨查看或提供給員工；工作表名稱會使用員工編號與姓名。'}
+              {exportLayout === 'personal'
+                ? '每位員工以個人月曆呈現，依序集中在同一工作表。'
+                : '日期為列、員工為欄；所有員工會在同一工作表中向右延伸。'}
             </p>
           </div>
           <DialogFooter>
