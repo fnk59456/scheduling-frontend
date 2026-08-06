@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useQueries } from '@tanstack/react-query'
-import { AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Clock3, Loader2 } from 'lucide-react'
+import { AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Clock3, Download, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { schedulesApi } from '@/api/endpoints/schedules'
+import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
-import {
-  getTimelineVersions,
-  resolveVersionForDate,
-} from '@/lib/scheduleVersionTimeline'
+import { buildCrossVersionWarningMap } from '@/lib/scheduleOverlap'
 import type { EmployeeListItem } from '@/types/employee'
 import type { ComplianceViolation, Schedule, ScheduleVersion } from '@/types/schedule'
 import type { ShiftTemplate } from '@/types/shift'
@@ -19,14 +19,14 @@ type DialogOrigin = {
   y: number
 }
 
+type ScheduleDisplayMode = 'current' | 'stitched'
+
 type EmployeeMonthScheduleDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   employee: EmployeeListItem
   versionId: number
   versionLabel: string
-  periodStart: string
-  periodEnd: string
   initialMonth: Date
   origin: DialogOrigin
   templates: ShiftTemplate[]
@@ -78,14 +78,16 @@ function employeeName(employee: EmployeeListItem) {
     || employee.user.username
 }
 
+function sanitizeFilename(value: string) {
+  return value.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_').replace(/\s+/g, ' ').trim()
+}
+
 export function EmployeeMonthScheduleDialog({
   open,
   onOpenChange,
   employee,
   versionId,
   versionLabel,
-  periodStart,
-  periodEnd,
   initialMonth,
   origin,
   templates,
@@ -93,10 +95,19 @@ export function EmployeeMonthScheduleDialog({
   versions,
 }: EmployeeMonthScheduleDialogProps) {
   const [month, setMonth] = useState(() => startOfMonth(initialMonth))
+  const [displayMode, setDisplayMode] = useState<ScheduleDisplayMode>('current')
+  const [exportLoading, setExportLoading] = useState(false)
+  const [showExportRange, setShowExportRange] = useState(false)
+  const [exportDateFrom, setExportDateFrom] = useState(() => formatDate(startOfMonth(initialMonth)))
+  const [exportDateTo, setExportDateTo] = useState(() => formatDate(endOfMonth(initialMonth)))
 
   useEffect(() => {
     if (open) {
       setMonth(startOfMonth(initialMonth))
+      setDisplayMode('current')
+      setShowExportRange(false)
+      setExportDateFrom(formatDate(startOfMonth(initialMonth)))
+      setExportDateTo(formatDate(endOfMonth(initialMonth)))
     }
   }, [employee.id, initialMonth, open])
 
@@ -117,17 +128,24 @@ export function EmployeeMonthScheduleDialog({
     [versionId, versions],
   )
   const timelineVersions = useMemo(
-    () => getTimelineVersions(
-      versions,
-      selectedVersion,
-      formatDate(calendarStart),
-      formatDate(calendarEnd),
-    ),
-    [calendarEnd, calendarStart, selectedVersion, versions],
+    () => selectedVersion
+      ? versions.filter((version) => (
+          version.organization === selectedVersion.organization
+          && version.version_type === selectedVersion.version_type
+          && version.status !== 'archived'
+        ))
+      : [],
+    [selectedVersion, versions],
+  )
+  const validationVersions = useMemo(
+    () => selectedVersion
+      ? [selectedVersion, ...timelineVersions.filter((version) => version.id !== selectedVersion.id)]
+      : [],
+    [selectedVersion, timelineVersions],
   )
   const scheduleQueries = useQueries({
     queries: open
-      ? timelineVersions.map((version) => ({
+      ? validationVersions.map((version) => ({
           queryKey: [
             'schedules',
             'employee-month-timeline',
@@ -149,20 +167,26 @@ export function EmployeeMonthScheduleDialog({
     () => scheduleQueries.flatMap((query) => query.data?.results ?? []),
     [scheduleQueries],
   )
-  const schedules = useMemo(
-    () => rawSchedules.filter((schedule) => (
-      resolveVersionForDate(
-        timelineVersions,
-        selectedVersion?.id ?? null,
-        schedule.schedule_date,
-      ).version?.id === schedule.schedule_version
-    )),
-    [rawSchedules, selectedVersion?.id, timelineVersions],
+  const currentVersionSchedules = useMemo(
+    () => rawSchedules.filter((schedule) => schedule.schedule_version === versionId),
+    [rawSchedules, versionId],
   )
-  const isLoading = scheduleQueries.some((query) => query.isLoading)
-  const isFetching = scheduleQueries.some((query) => query.isFetching)
-  const isError = scheduleQueries.some((query) => query.isError)
-  const refetch = () => Promise.all(scheduleQueries.map((query) => query.refetch()))
+  const schedules = useMemo(
+    () => displayMode === 'stitched' ? rawSchedules : currentVersionSchedules,
+    [currentVersionSchedules, displayMode, rawSchedules],
+  )
+  const isLoading = displayMode === 'stitched'
+    ? scheduleQueries.some((query) => query.isLoading)
+    : (scheduleQueries[0]?.isLoading ?? false)
+  const isFetching = displayMode === 'stitched'
+    ? scheduleQueries.some((query) => query.isFetching)
+    : (scheduleQueries[0]?.isFetching ?? false)
+  const isError = displayMode === 'stitched'
+    ? scheduleQueries.some((query) => query.isError)
+    : (scheduleQueries[0]?.isError ?? false)
+  const refetch = () => displayMode === 'stitched'
+    ? Promise.all(scheduleQueries.map((query) => query.refetch()))
+    : scheduleQueries[0]?.refetch()
   const scheduleByDate = useMemo(() => {
     const map = new Map<string, Schedule[]>()
     for (const schedule of schedules) {
@@ -214,33 +238,21 @@ export function EmployeeMonthScheduleDialog({
     }
     return map
   }, [visibleViolations])
-  const versionResolutionByDate = useMemo(() => {
-    const map = new Map<string, ReturnType<typeof resolveVersionForDate>>()
-    for (const day of calendarDays) {
-      const date = formatDate(day)
-      map.set(date, resolveVersionForDate(
-        timelineVersions,
-        selectedVersion?.id ?? null,
-        date,
-      ))
-    }
-    return map
-  }, [calendarDays, selectedVersion?.id, timelineVersions])
+  const crossVersionWarningMap = useMemo(
+    () => buildCrossVersionWarningMap(rawSchedules),
+    [rawSchedules],
+  )
   const visibleOwnerVersions = useMemo(() => {
-    const map = new Map<number, ScheduleVersion>()
-    for (const day of calendarDays) {
-      const owner = versionResolutionByDate.get(formatDate(day))?.version
-      if (owner) map.set(owner.id, owner)
-    }
-    return [...map.values()].sort((a, b) => a.period_start.localeCompare(b.period_start))
-  }, [calendarDays, versionResolutionByDate])
+    const versionIds = new Set(monthSchedules.map((schedule) => schedule.schedule_version))
+    return timelineVersions
+      .filter((version) => versionIds.has(version.id))
+      .sort((left, right) => left.version_label.localeCompare(right.version_label, 'zh-TW'))
+  }, [monthSchedules, timelineVersions])
   const conflictDates = useMemo(
-    () => calendarDays
-      .filter((day) => (
-        (versionResolutionByDate.get(formatDate(day))?.conflicts.length ?? 0) > 1
-      ))
-      .map(formatDate),
-    [calendarDays, versionResolutionByDate],
+    () => [...new Set(monthSchedules
+      .filter((schedule) => (crossVersionWarningMap.get(schedule.id)?.length ?? 0) > 0)
+      .map((schedule) => schedule.schedule_date))].sort(),
+    [crossVersionWarningMap, monthSchedules],
   )
 
   const totalHours = useMemo(
@@ -253,11 +265,69 @@ export function EmployeeMonthScheduleDialog({
 
   const todayKey = formatDate(new Date())
   const monthLabel = new Intl.DateTimeFormat('zh-TW', { year: 'numeric', month: 'long' }).format(month)
-  const monthHasVersion = timelineVersions.some((version) => (
-    version.period_start <= formatDate(monthEnd)
-    && version.period_end >= formatDate(monthStart)
-  ))
   const name = employeeName(employee)
+  const modeLabel = displayMode === 'stitched' ? '跨版本拼接' : '目前版本'
+  const exportRangeDiffersFromPreview = exportDateFrom !== formatDate(monthStart)
+    || exportDateTo !== formatDate(monthEnd)
+
+  const openExportRange = () => {
+    setExportDateFrom(formatDate(monthStart))
+    setExportDateTo(formatDate(monthEnd))
+    setShowExportRange(true)
+  }
+
+  const downloadPersonalSchedule = async () => {
+    if (!selectedVersion || !exportDateFrom || !exportDateTo || exportDateFrom > exportDateTo) {
+      toast({
+        title: '下載失敗',
+        description: '請確認起訖日期正確',
+        variant: 'destructive',
+      })
+      return
+    }
+    try {
+      setExportLoading(true)
+      const exportVersions = displayMode === 'stitched' ? timelineVersions : [selectedVersion]
+      const scheduleResponses = await Promise.all(
+        exportVersions.map((version) => schedulesApi.listAll({
+          version: version.id,
+          employee: employee.id,
+          date_from: exportDateFrom,
+          date_to: exportDateTo,
+        })),
+      )
+      const exportSchedules = scheduleResponses.flatMap((response) => response.results)
+      const { createScheduleWorkbook } = await import('@/lib/scheduleExcelExport')
+      const buffer = await createScheduleWorkbook({
+        schedules: exportSchedules,
+        employees: [employee],
+        dateFrom: exportDateFrom,
+        dateTo: exportDateTo,
+        versionLabel: `${name}｜${exportDateFrom}～${exportDateTo} 個人班表（${modeLabel}）`,
+        layout: 'personal',
+      })
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = sanitizeFilename(`${employee.employee_id}_${name}_個人班表_${modeLabel}_${exportDateFrom}_${exportDateTo}.xlsx`)
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+      setShowExportRange(false)
+    } catch (error: unknown) {
+      toast({
+        title: '下載失敗',
+        description: error instanceof Error ? error.message : '無法產生個人班表 Excel',
+        variant: 'destructive',
+      })
+    } finally {
+      setExportLoading(false)
+    }
+  }
 
   const dialogStyle = {
     '--month-dialog-x': `${origin.x}px`,
@@ -294,9 +364,45 @@ export function EmployeeMonthScheduleDialog({
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Clock3 className="h-3.5 w-3.5" />預計工時</div>
             <div className="mt-1 text-xl font-bold">{Math.round(totalHours * 10) / 10}<span className="ml-1 text-xs font-normal text-muted-foreground">小時</span></div>
           </div>
-          <div className={cn('rounded-lg border px-3 py-2.5', relevantViolations.length ? 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40' : 'bg-muted/30')}>
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><AlertTriangle className="h-3.5 w-3.5" />合規提醒</div>
-            <div className="mt-1 text-xl font-bold">{relevantViolations.length}<span className="ml-1 text-xs font-normal text-muted-foreground">項</span></div>
+          <div className={cn(
+            'rounded-lg border px-3 py-2.5',
+            (displayMode === 'stitched' ? conflictDates.length : relevantViolations.length)
+              ? 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40'
+              : 'bg-muted/30',
+          )}>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              {displayMode === 'stitched' ? '重疊提醒' : '合規提醒'}
+            </div>
+            <div className="mt-1 text-xl font-bold">
+              {displayMode === 'stitched' ? conflictDates.length : relevantViolations.length}
+              <span className="ml-1 text-xs font-normal text-muted-foreground">項</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-center">
+          <div className="inline-flex rounded-lg border bg-muted/30 p-1" role="group" aria-label="月班表顯示模式">
+            <Button
+              type="button"
+              size="sm"
+              variant={displayMode === 'current' ? 'default' : 'ghost'}
+              className="h-8 rounded-md px-4"
+              onClick={() => setDisplayMode('current')}
+              aria-pressed={displayMode === 'current'}
+            >
+              目前版本
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={displayMode === 'stitched' ? 'default' : 'ghost'}
+              className="h-8 rounded-md px-4"
+              onClick={() => setDisplayMode('stitched')}
+              aria-pressed={displayMode === 'stitched'}
+            >
+              跨版本拼接
+            </Button>
           </div>
         </div>
 
@@ -322,45 +428,105 @@ export function EmployeeMonthScheduleDialog({
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="sm:ml-2"
+            onClick={openExportRange}
+            disabled={exportLoading || !selectedVersion}
+          >
+            {exportLoading
+              ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              : <Download className="mr-2 h-4 w-4" />}
+            下載 Excel
+          </Button>
         </div>
 
-        {visibleOwnerVersions.length > 1 && (
-          <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50/70 px-4 py-3 text-blue-900">
-            <CalendarDays className="mt-0.5 h-4 w-4 shrink-0" />
-            <div>
-              <div className="text-sm font-medium">
-                本頁月曆由 {visibleOwnerVersions.length} 個連續版本拼接顯示
+        {showExportRange && (
+          <div className="rounded-lg border bg-muted/20 p-4">
+            <div className="mb-3">
+              <div className="text-sm font-medium">個人班表輸出範圍</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                目前採用「{modeLabel}」模式；Excel 將使用與月班表相同的班次來源，並只輸出 {name}。
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+              <div className="space-y-1.5">
+                <Label htmlFor="personal-export-date-from">起始日期</Label>
+                <Input
+                  id="personal-export-date-from"
+                  type="date"
+                  value={exportDateFrom}
+                  onChange={(event) => setExportDateFrom(event.target.value)}
+                  disabled={exportLoading}
+                />
               </div>
-              <div className="mt-1 flex flex-wrap gap-1.5 text-xs text-blue-800/80">
-                {visibleOwnerVersions.map((version) => (
-                  <span key={version.id} className="rounded-full border border-blue-200 bg-background px-2 py-0.5">
-                    {version.version_label}
-                  </span>
-                ))}
+              <div className="space-y-1.5">
+                <Label htmlFor="personal-export-date-to">結束日期</Label>
+                <Input
+                  id="personal-export-date-to"
+                  type="date"
+                  value={exportDateTo}
+                  min={exportDateFrom || undefined}
+                  onChange={(event) => setExportDateTo(event.target.value)}
+                  disabled={exportLoading}
+                />
+              </div>
+              <div className="flex gap-2 sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowExportRange(false)}
+                  disabled={exportLoading}
+                >
+                  取消
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={downloadPersonalSchedule}
+                  disabled={exportLoading || !exportDateFrom || !exportDateTo || exportDateFrom > exportDateTo}
+                >
+                  {exportLoading
+                    ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    : <Download className="mr-2 h-4 w-4" />}
+                  下載
+                </Button>
               </div>
             </div>
+            {exportRangeDiffersFromPreview && (
+              <p className="mt-3 text-xs text-amber-700">
+                下載範圍超出目前預覽月份；資料來源模式相同，但額外月份不會顯示在目前月曆上。
+              </p>
+            )}
           </div>
         )}
 
-        {conflictDates.length > 0 && (
-          <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-destructive">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div>
-              <div className="text-sm font-medium">本月存在重疊的排班版本</div>
-              <div className="mt-0.5 text-xs opacity-80">
-                衝突日期：{conflictDates.join('、')}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!monthHasVersion && (
-          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-3 text-amber-900">
-            <CalendarDays className="mt-0.5 h-4 w-4 shrink-0" />
-            <div>
-              <div className="text-sm font-medium">此月份尚無排班版本</div>
-              <div className="mt-0.5 text-xs text-amber-800/80">
-                目前操作版本為「{versionLabel}」（{periodStart} ～ {periodEnd}）；此月份僅供瀏覽。
+        {displayMode === 'stitched' && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50/70 px-4 py-3 text-blue-900">
+            <div className="flex items-start gap-2">
+              <CalendarDays className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="min-w-0">
+                <div className="text-sm font-medium">
+                  {visibleOwnerVersions.length > 0
+                    ? `本月已拼接 ${visibleOwnerVersions.length} 個含班次版本`
+                    : '本月沒有可拼接的班次'}
+                </div>
+                {visibleOwnerVersions.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
+                    {visibleOwnerVersions.map((version) => (
+                      <span key={version.id} className="rounded-full border border-blue-200 bg-background px-2 py-0.5">
+                        {version.version_label}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {conflictDates.length > 0 && (
+                  <p className="mt-1.5 text-xs text-amber-700">
+                    重疊日期：{conflictDates.join('、')}；班次會全部保留並標示警告。
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -379,14 +545,8 @@ export function EmployeeMonthScheduleDialog({
               {calendarDays.map((date, index) => {
                 const dateKey = formatDate(date)
                 const isCurrentMonth = date.getMonth() === month.getMonth()
-                const resolution = versionResolutionByDate.get(dateKey)
-                const ownerVersion = resolution?.version
-                const hasConflict = (resolution?.conflicts.length ?? 0) > 1
-                const previousOwner = index > 0
-                  ? versionResolutionByDate.get(formatDate(calendarDays[index - 1]))?.version
-                  : null
-                const isVersionBoundary = index > 0 && ownerVersion?.id !== previousOwner?.id
                 const daySchedules = scheduleByDate.get(dateKey) ?? []
+                const hasConflict = daySchedules.some((schedule) => (crossVersionWarningMap.get(schedule.id)?.length ?? 0) > 0)
 
                 return (
                   <div
@@ -395,9 +555,7 @@ export function EmployeeMonthScheduleDialog({
                       'min-h-24 border-b border-r p-1.5 last:border-r-0',
                       (index % 7 === 0 || index % 7 === 6) && isCurrentMonth && 'bg-primary/[0.025]',
                       !isCurrentMonth && 'bg-muted/20 text-muted-foreground/50',
-                      !ownerVersion && 'bg-muted/30',
-                      isVersionBoundary && 'border-l-2 border-l-primary/50',
-                      hasConflict && 'bg-destructive/5',
+                      hasConflict && 'bg-amber-50/40',
                     )}
                   >
                     <div className="flex items-center justify-between px-0.5">
@@ -411,22 +569,31 @@ export function EmployeeMonthScheduleDialog({
                         && <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />}
                     </div>
 
-                    {ownerVersion && !hasConflict && daySchedules.length ? (
+                    {daySchedules.length ? (
                       <div className={cn('mt-1 space-y-1', !isCurrentMonth && 'opacity-70')}>
                         {daySchedules.map((schedule) => {
                           const templateIndex = templateIndexById.get(schedule.shift_template.id) ?? schedule.shift_template.id
                           const violation = violationByCell.get(`${dateKey}:${schedule.shift_template.id}`)
+                          const crossWarnings = crossVersionWarningMap.get(schedule.id) ?? []
+                          const scheduleVersion = timelineVersions.find((version) => version.id === schedule.schedule_version)
                           return (
                             <div
                               key={schedule.id}
                               className={cn(
-                                'rounded-md border px-2 py-1.5',
+                                'relative rounded-md border px-2 py-1.5',
                                 shiftChipColors[templateIndex % shiftChipColors.length],
                                 violation?.severity === 'hard' && 'border-destructive ring-1 ring-destructive/40',
                                 violation?.severity === 'soft' && 'border-amber-400 ring-1 ring-amber-300/50',
+                                crossWarnings.length > 0 && 'border-amber-400 pr-6 ring-1 ring-amber-300/50',
                               )}
                               title={[
-                                ownerVersion.id !== versionId ? `來自版本：${ownerVersion.version_label}` : '',
+                                displayMode === 'stitched'
+                                  ? `來源版本：${scheduleVersion?.version_label ?? `#${schedule.schedule_version}`}`
+                                  : '',
+                                ...crossWarnings.map((other) => {
+                                  const otherVersion = timelineVersions.find((version) => version.id === other.schedule_version)
+                                  return `跨版本重疊：${otherVersion?.version_label ?? `#${other.schedule_version}`} · ${other.shift_template.name} ${other.shift_template.start_time.slice(0, 5)}-${other.shift_template.end_time.slice(0, 5)}`
+                                }),
                                 violation ? `${violation.rule_label}：${JSON.stringify(violation.detail)}` : '',
                               ].filter(Boolean).join('\n') || undefined}
                             >
@@ -434,16 +601,20 @@ export function EmployeeMonthScheduleDialog({
                               <div className="mt-0.5 whitespace-nowrap font-mono text-[10px] opacity-75">
                                 {schedule.shift_template.start_time.slice(0, 5)}-{schedule.shift_template.end_time.slice(0, 5)}
                               </div>
+                              {displayMode === 'stitched' && (
+                                <div className="mt-0.5 truncate text-[9px] opacity-65">
+                                  {scheduleVersion?.version_label ?? `版本 #${schedule.schedule_version}`}
+                                </div>
+                              )}
+                              {crossWarnings.length > 0 && (
+                                <AlertTriangle className="absolute bottom-1.5 right-1.5 h-3 w-3 text-amber-600" />
+                              )}
                             </div>
                           )
                         })}
                       </div>
-                    ) : hasConflict ? (
-                      <div className="mt-3 text-center text-[10px] text-destructive">版本衝突</div>
-                    ) : isCurrentMonth && ownerVersion ? (
+                    ) : isCurrentMonth ? (
                       <div className="mt-3 text-center text-[10px] text-muted-foreground/70">未排班</div>
-                    ) : isCurrentMonth && !ownerVersion ? (
-                      <div className="mt-3 text-center text-[10px] text-muted-foreground/55">尚無版本</div>
                     ) : null}
                   </div>
                 )
@@ -468,7 +639,10 @@ export function EmployeeMonthScheduleDialog({
         </div>
 
         <p className="text-center text-xs text-muted-foreground">
-          連續瀏覽會拼接同一分店、同一軌的相鄰版本；未排班不代表已核准休假。
+          {displayMode === 'current'
+            ? '目前版本模式只顯示所選版本；其他版本僅用於衝突警示。'
+            : '跨版本拼接模式會顯示並下載相同機構、相同 A/B 軌的所有非封存版本。'}
+          未排班不代表已核准休假。
         </p>
       </DialogContent>
     </Dialog>

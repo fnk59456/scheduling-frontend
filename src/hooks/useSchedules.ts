@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { scheduleVersionsApi, schedulesApi, scheduleChangesApi } from '@/api/endpoints/schedules'
+import { scheduleVersionsApi, schedulesApi, scheduleChangesApi, scheduleOverlapDecisionsApi } from '@/api/endpoints/schedules'
 import { parseApiErrorMessage } from '@/api/errors'
 import type {
   ScheduleVersionCreateRequest,
@@ -7,6 +7,7 @@ import type {
   ScheduleUpdateRequest,
   CheckComplianceRequest,
   DeriveLegalRequest,
+  ScheduleOverlapDecisionType,
 } from '@/types/schedule'
 import { toast } from '@/hooks/use-toast'
 import axios from 'axios'
@@ -55,6 +56,46 @@ export function useApproveScheduleVersion() {
       toast({ title: '簽核成功', description: '排班版本已簽核' })
     },
     onError: () => toast({ title: '簽核失敗', description: '無法簽核排班版本', variant: 'destructive' }),
+  })
+}
+
+export function useUnapproveScheduleVersion() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+      scheduleVersionsApi.unapprove(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: VERSIONS_KEY })
+      qc.invalidateQueries({ queryKey: ['approvedScheduleTimeline'] })
+      toast({ title: '已取消簽核', description: '版本已回到草稿狀態' })
+    },
+    onError: (err) => toast({
+      title: '取消簽核失敗',
+      description: parseApiErrorMessage(err, '無法取消簽核版本'),
+      variant: 'destructive',
+    }),
+  })
+}
+
+export function useDecideScheduleOverlap() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: {
+      conflict_key: string
+      schedule_ids: number[]
+      decision: ScheduleOverlapDecisionType
+      selected_schedule_ids: number[]
+      comment: string
+    }) => scheduleOverlapDecisionsApi.decide(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['approvedScheduleTimeline'] })
+      toast({ title: '裁決已保存', description: '簽核總表已更新' })
+    },
+    onError: (err) => toast({
+      title: '裁決失敗',
+      description: parseApiErrorMessage(err, '無法保存重疊時段裁決'),
+      variant: 'destructive',
+    }),
   })
 }
 

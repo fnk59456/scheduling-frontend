@@ -13,6 +13,9 @@ import type {
   CheckComplianceResult,
   DeriveLegalRequest,
   DeriveLegalResult,
+  ApprovedTimelineResponse,
+  ScheduleOverlapDecision,
+  ScheduleOverlapDecisionType,
 } from '@/types/schedule'
 
 export const scheduleVersionsApi = {
@@ -41,6 +44,19 @@ export const scheduleVersionsApi = {
   approve: (id: number) =>
     apiClient.post<ScheduleVersion>(`/schedules/versions/${id}/approve/`, {}).then((r) => r.data),
 
+  unapprove: (id: number, reason: string) =>
+    apiClient.post<ScheduleVersion>(`/schedules/versions/${id}/unapprove/`, { reason }).then((r) => r.data),
+
+  approvedTimeline: (params: {
+    organization: number
+    branch?: number | 'all'
+    version_type: 'legal' | 'actual'
+    date_from: string
+    date_to: string
+  }) => apiClient
+    .get<ApprovedTimelineResponse>('/schedules/versions/approved-timeline/', { params })
+    .then((r) => r.data),
+
   createDualVersions: (id: number) =>
     apiClient.post<ScheduleVersion>(`/schedules/versions/${id}/create_dual_versions/`, {}).then((r) => r.data),
 
@@ -60,6 +76,18 @@ export const scheduleVersionsApi = {
     apiClient
       .post<DeriveLegalResult>(`/schedules/versions/${bVersionId}/derive-legal/`, body ?? {})
       .then((r) => r.data),
+}
+
+export const scheduleOverlapDecisionsApi = {
+  decide: (data: {
+    conflict_key: string
+    schedule_ids: number[]
+    decision: ScheduleOverlapDecisionType
+    selected_schedule_ids: number[]
+    comment: string
+  }) => apiClient
+    .post<ScheduleOverlapDecision>('/schedules/overlap-decisions/', data)
+    .then((r) => r.data),
 }
 
 type ScheduleListParams = {

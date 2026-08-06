@@ -28,8 +28,8 @@ export interface ScheduleVersionCreateRequest {
   branch?: number | null
   version_label: string
   version_type: ScheduleVersionType
-  period_start: string
-  period_end: string
+  period_start?: string
+  period_end?: string
 }
 
 export type ScheduleStatus = 'draft' | 'assigned' | 'confirmed' | 'completed' | 'cancelled'
@@ -99,6 +99,43 @@ export interface ScheduleChange {
   changed_at: string
   approved_by: number | null
   approved_at: string | null
+}
+
+export type ScheduleOverlapDecisionType = 'select' | 'coexist'
+
+export interface ScheduleOverlapDecision {
+  id: number
+  conflict_key: string
+  organization: number
+  branch: number | null
+  version_type: ScheduleVersionType
+  employee: number
+  schedule_date: string
+  schedule_ids: number[]
+  decision: ScheduleOverlapDecisionType
+  selected_schedule_ids: number[]
+  comment: string
+  decided_by: number | null
+  decided_by_name: string
+  decided_at: string
+  created_at: string
+}
+
+export interface ApprovedTimelineConflict {
+  conflict_key: string
+  starts_at: string
+  ends_at: string
+  employee_id: number
+  schedule_ids: number[]
+  schedules: Schedule[]
+  decision: ScheduleOverlapDecision | null
+}
+
+export interface ApprovedTimelineResponse {
+  versions: ScheduleVersion[]
+  schedules: Schedule[]
+  conflicts: ApprovedTimelineConflict[]
+  unresolved_conflict_count: number
 }
 
 // ===== 合規檢查 (POST /schedules/versions/{id}/check-compliance/) =====

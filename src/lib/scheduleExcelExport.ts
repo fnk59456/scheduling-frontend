@@ -201,6 +201,11 @@ function renderEmployeeBlock(
     schedulesForDate.push(schedule)
     scheduleByDate.set(schedule.schedule_date, schedulesForDate)
   }
+  for (const schedulesForDate of scheduleByDate.values()) {
+    schedulesForDate.sort((a, b) => (
+      a.shift_template.start_time.localeCompare(b.shift_template.start_time)
+    ))
+  }
 
   const scheduledDays = scheduleByDate.size
   const totalHours = group.schedules.reduce((total, schedule) => {
@@ -604,7 +609,7 @@ export async function createScheduleWorkbook({
   }
 
   if (layout === 'personal') {
-    const employeeGroups = groupSchedulesByEmployee(schedules)
+    const employeeGroups = groupSchedulesByEmployee(schedules, employees)
     const months = buildMonthSections(dateFrom, dateTo)
     const sheet = workbook.addWorksheet('個人版表')
     configureWorksheet(sheet, versionLabel, dateFrom, dateTo)
