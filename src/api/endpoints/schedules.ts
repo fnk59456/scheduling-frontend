@@ -14,6 +14,7 @@ import type {
   DeriveLegalRequest,
   DeriveLegalResult,
   ApprovedTimelineResponse,
+  ScheduleDayOverviewResponse,
   ScheduleOverlapDecision,
   ScheduleOverlapDecisionType,
 } from '@/types/schedule'
@@ -121,6 +122,16 @@ export const schedulesApi = {
 
   delete: (id: number) =>
     apiClient.delete(`/schedules/schedules/${id}/`),
+
+  /** 單日跨版本概覽：新增／拖曳班次前提供資訊提示，不阻擋儲存。 */
+  dayOverview: (params: {
+    date: string
+    employee?: number
+    exclude_version?: number
+    include_archived?: boolean
+  }) => apiClient
+    .get<ScheduleDayOverviewResponse>('/schedules/day-overview/', { params })
+    .then((r) => r.data),
 }
 
 export const scheduleChangesApi = {

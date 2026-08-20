@@ -138,6 +138,27 @@ export interface ApprovedTimelineResponse {
   unresolved_conflict_count: number
 }
 
+export interface ScheduleDayOverviewVersion {
+  id: number
+  version_label: string
+  version_type: ScheduleVersionType
+  status: ScheduleVersionStatus
+  branch: number | null
+  branch_name: string | null
+  period_start: string
+  period_end: string
+}
+
+export interface ScheduleDayOverviewEntry {
+  version: ScheduleDayOverviewVersion
+  schedules: Schedule[]
+}
+
+export interface ScheduleDayOverviewResponse {
+  date: string
+  entries: ScheduleDayOverviewEntry[]
+}
+
 // ===== 合規檢查 (POST /schedules/versions/{id}/check-compliance/) =====
 
 export type ComplianceSeverity = 'hard' | 'soft'
