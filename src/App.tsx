@@ -23,6 +23,7 @@ import CompliancePage from '@/pages/compliance/CompliancePage'
 import AIAssistantPage from '@/pages/ai/AIAssistantPage'
 import AuditPage from '@/pages/audit/AuditPage'
 import PlaceholderPage from '@/pages/PlaceholderPage'
+import { Toaster } from '@/components/ui/toaster'
 import './index.css'
 
 function App() {
@@ -118,6 +119,7 @@ function App() {
             />
           </Routes>
         </Router>
+        <Toaster />
       </ThemeProvider>
     </QueryClientProvider>
   )

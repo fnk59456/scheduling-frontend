@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, Settings2,
   CheckCircle, Clock, ShieldCheck, ShieldAlert, ArrowRight, AlertTriangle,
-  CalendarDays, Download, FileCheck2,
+  CalendarDays, Download, FileCheck2, GitCompareArrows, MinusCircle,
+  PencilLine, PlusCircle,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -13,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useOrganizations, useBranches } from '@/hooks/useOrganizations'
 import { useEmployees } from '@/hooks/useEmployees'
 import { useShiftRules, useShiftTemplates } from '@/hooks/useShifts'
@@ -38,6 +40,7 @@ import type {
   ComplianceViolation,
   CheckComplianceResult,
   DeriveLegalResult,
+  ScheduleCompareResult,
 } from '@/types/schedule'
 import { toast } from '@/hooks/use-toast'
 import { scheduleVersionsApi, schedulesApi } from '@/api/endpoints/schedules'
@@ -48,6 +51,7 @@ import {
   findCandidateCrossVersionOverlaps,
 } from '@/lib/scheduleOverlap'
 import { EmployeeMonthScheduleDialog } from './EmployeeMonthScheduleDialog'
+import { WeekDatePicker } from './WeekDatePicker'
 import type { EmployeeListItem } from '@/types/employee'
 
 function fmtDate(d: Date) {
@@ -97,6 +101,93 @@ function buildVersionLabel(start: Date, end: Date) {
 
 const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日']
 
+type VersionGroup = 'unapproved' | 'approved'
+type CompareFilter = 'all' | 'removed' | 'added' | 'changed'
+
+type CompareRow = {
+  key: string
+  kind: Exclude<CompareFilter, 'all'>
+  date: string
+  before?: Schedule
+  after?: Schedule
+}
+
+function scheduleCompareKey(schedule: Schedule) {
+  return `${schedule.employee.id}_${schedule.schedule_date}_${schedule.shift_template.id}`
+}
+
+function comparisonKeyDate(key: string) {
+  return key.split('_')[1] ?? ''
+}
+
+function formatComparisonDate(value: string) {
+  if (!value) return '日期不明'
+  const date = parseDate(value)
+  return `${date.getMonth() + 1} 月 ${date.getDate()} 日（週${weekdayLabels[(date.getDay() + 6) % 7]}）`
+}
+
+function scheduleEmployeeName(schedule?: Schedule) {
+  if (!schedule) return '員工資料未載入'
+  return schedule.employee.user_name || schedule.employee.employee_id || `員工 #${schedule.employee.id}`
+}
+
+function scheduleTimeLabel(schedule?: Schedule) {
+  if (!schedule) return '班別資料未載入'
+  return `${schedule.shift_template.name} · ${schedule.shift_template.start_time.slice(0, 5)}–${schedule.shift_template.end_time.slice(0, 5)}`
+}
+
+function CompareScheduleRow({ row }: { row: CompareRow }) {
+  const schedule = row.after ?? row.before
+  const changes = row.kind === 'changed' && row.before && row.after
+    ? [
+      row.before.expected_hours !== row.after.expected_hours
+        ? { label: '工時', before: `${Number(row.before.expected_hours)} 小時`, after: `${Number(row.after.expected_hours)} 小時` }
+        : null,
+      row.before.status !== row.after.status
+        ? { label: '狀態', before: row.before.status_display, after: row.after.status_display }
+        : null,
+      row.before.notes !== row.after.notes
+        ? { label: '備註', before: row.before.notes || '無', after: row.after.notes || '無' }
+        : null,
+    ].filter((change): change is { label: string; before: string; after: string } => Boolean(change))
+    : []
+
+  const presentation = row.kind === 'added'
+    ? { label: '版本 2 新增', icon: PlusCircle, color: 'text-emerald-700', surface: 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900 dark:bg-emerald-950/20' }
+    : row.kind === 'removed'
+      ? { label: '版本 2 移除', icon: MinusCircle, color: 'text-rose-700', surface: 'border-rose-200 bg-rose-50/60 dark:border-rose-900 dark:bg-rose-950/20' }
+      : { label: '內容異動', icon: PencilLine, color: 'text-amber-700', surface: 'border-amber-200 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/20' }
+  const Icon = presentation.icon
+
+  return (
+    <div className={cn('rounded-lg border p-3', presentation.surface)}>
+      <div className="flex items-start gap-3">
+        <Icon className={cn('mt-0.5 h-5 w-5 shrink-0', presentation.color)} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <p className="font-medium">{scheduleEmployeeName(schedule)}</p>
+            <Badge variant="outline" className={cn('bg-background/70', presentation.color)}>{presentation.label}</Badge>
+          </div>
+          <p className="mt-0.5 text-sm text-muted-foreground">{scheduleTimeLabel(schedule)}</p>
+
+          {changes.length > 0 && (
+            <div className="mt-3 space-y-2 border-t border-current/10 pt-3">
+              {changes.map((change) => (
+                <div key={change.label} className="grid gap-1 text-sm sm:grid-cols-[4rem_1fr_auto_1fr] sm:items-center">
+                  <span className="text-xs font-medium text-muted-foreground">{change.label}</span>
+                  <span className="rounded-md bg-background/75 px-2 py-1 text-muted-foreground">{change.before}</span>
+                  <ArrowRight className="hidden h-3.5 w-3.5 text-muted-foreground sm:block" />
+                  <span className="rounded-md bg-background px-2 py-1 font-medium">{change.after}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const shiftChipColors = [
   { bg: 'bg-sky-50',    border: 'border-sky-200',    text: 'text-sky-700',    dot: 'bg-sky-500' },
   { bg: 'bg-amber-50',  border: 'border-amber-200',  text: 'text-amber-700',  dot: 'bg-amber-500' },
@@ -136,6 +227,7 @@ export default function SchedulesPage() {
   const [orgId, setOrgId] = useState<string>('')
   const [branchId, setBranchId] = useState<string>('all')
   const [versionId, setVersionId] = useState<string>('none')
+  const [activeVersionGroup, setActiveVersionGroup] = useState<VersionGroup>('unapproved')
 
   const orgIdResolved = useMemo(() => {
     const n = Number(orgId)
@@ -174,8 +266,21 @@ export default function SchedulesPage() {
     organization: orgIdResolved ?? undefined,
   })
   const versions = versionsData?.results ?? []
+  const visibleVersions = useMemo(
+    () => versions.filter((version) => version.status !== 'archived'),
+    [versions],
+  )
+  const unapprovedVersions = useMemo(
+    () => visibleVersions.filter((version) => version.status !== 'approved'),
+    [visibleVersions],
+  )
+  const approvedVersions = useMemo(
+    () => visibleVersions.filter((version) => version.status === 'approved'),
+    [visibleVersions],
+  )
+  const versionsInActiveGroup = activeVersionGroup === 'approved' ? approvedVersions : unapprovedVersions
 
-  const selectedVersion = versions.find((v) => String(v.id) === versionId) ?? null
+  const selectedVersion = visibleVersions.find((v) => String(v.id) === versionId) ?? null
   const canEditSelectedVersion = selectedVersion?.status === 'draft'
 
   const [weekStart, setWeekStart] = useState<Date>(() => startOfWeek(new Date()))
@@ -192,10 +297,14 @@ export default function SchedulesPage() {
 
   useEffect(() => {
     if (versionsLoading) return
-    if (versionId === 'none' && versions.length > 0) {
-      setVersionId(String(versions[0].id))
+    if (selectedVersion) {
+      setActiveVersionGroup(selectedVersion.status === 'approved' ? 'approved' : 'unapproved')
+      return
     }
-  }, [versionsLoading, versionId, versions])
+    const firstAvailable = unapprovedVersions[0] ?? approvedVersions[0]
+    setActiveVersionGroup(unapprovedVersions.length > 0 ? 'unapproved' : 'approved')
+    setVersionId(firstAvailable ? String(firstAvailable.id) : 'none')
+  }, [approvedVersions, selectedVersion, unapprovedVersions, versionsLoading])
 
   useEffect(() => {
     if (!selectedVersion) return
@@ -667,23 +776,62 @@ export default function SchedulesPage() {
   }
 
   // ===== 版本比較 =====
-  type CompareResult = {
-    version1: unknown
-    version2: unknown
-    only_in_version1: string[]
-    only_in_version2: string[]
-    differences: Array<{ key: string; version1: unknown; version2: unknown }>
-  }
-
   const [showCompareDialog, setShowCompareDialog] = useState(false)
   const [compareVersion2Id, setCompareVersion2Id] = useState<string>('none')
   const [compareLoading, setCompareLoading] = useState(false)
-  const [compareResult, setCompareResult] = useState<CompareResult | null>(null)
+  const [compareResult, setCompareResult] = useState<ScheduleCompareResult | null>(null)
+  const [compareSchedules, setCompareSchedules] = useState<{ version1: Schedule[]; version2: Schedule[] }>({
+    version1: [],
+    version2: [],
+  })
+  const [compareFilter, setCompareFilter] = useState<CompareFilter>('all')
+
+  const compareRows = useMemo<CompareRow[]>(() => {
+    if (!compareResult) return []
+    const version1ByKey = new Map(compareSchedules.version1.map((schedule) => [scheduleCompareKey(schedule), schedule]))
+    const version2ByKey = new Map(compareSchedules.version2.map((schedule) => [scheduleCompareKey(schedule), schedule]))
+    const rows: CompareRow[] = [
+      ...compareResult.only_in_version1.map((key) => ({
+        key,
+        kind: 'removed' as const,
+        date: version1ByKey.get(key)?.schedule_date ?? comparisonKeyDate(key),
+        before: version1ByKey.get(key),
+      })),
+      ...compareResult.only_in_version2.map((key) => ({
+        key,
+        kind: 'added' as const,
+        date: version2ByKey.get(key)?.schedule_date ?? comparisonKeyDate(key),
+        after: version2ByKey.get(key),
+      })),
+      ...compareResult.differences.map((difference) => ({
+        key: difference.key,
+        kind: 'changed' as const,
+        date: difference.version2.schedule_date || difference.version1.schedule_date,
+        before: difference.version1,
+        after: difference.version2,
+      })),
+    ]
+    return rows.sort((left, right) => (
+      left.date.localeCompare(right.date)
+      || scheduleEmployeeName(left.after ?? left.before).localeCompare(scheduleEmployeeName(right.after ?? right.before), 'zh-TW')
+    ))
+  }, [compareResult, compareSchedules])
+
+  const groupedCompareRows = useMemo(() => {
+    const rows = compareFilter === 'all'
+      ? compareRows
+      : compareRows.filter((row) => row.kind === compareFilter)
+    const groups = new Map<string, CompareRow[]>()
+    rows.forEach((row) => groups.set(row.date, [...(groups.get(row.date) ?? []), row]))
+    return Array.from(groups.entries())
+  }, [compareFilter, compareRows])
 
   const openCompare = () => {
     if (!selectedVersion) return
     setCompareVersion2Id('none')
     setCompareResult(null)
+    setCompareSchedules({ version1: [], version2: [] })
+    setCompareFilter('all')
     setShowCompareDialog(true)
   }
 
@@ -691,8 +839,15 @@ export default function SchedulesPage() {
     if (!selectedVersion || compareVersion2Id === 'none') return
     try {
       setCompareLoading(true)
-      const data = (await scheduleVersionsApi.compare(selectedVersion.id, Number(compareVersion2Id))) as CompareResult
-      setCompareResult(data)
+      const version2Id = Number(compareVersion2Id)
+      const [result, version1Schedules, version2Schedules] = await Promise.all([
+        scheduleVersionsApi.compare(selectedVersion.id, version2Id),
+        schedulesApi.listAll({ version: selectedVersion.id }),
+        schedulesApi.listAll({ version: version2Id }),
+      ])
+      setCompareResult(result)
+      setCompareSchedules({ version1: version1Schedules.results, version2: version2Schedules.results })
+      setCompareFilter('all')
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '無法比較版本差異'
       toast({ title: '比較失敗', description: msg, variant: 'destructive' })
@@ -816,15 +971,16 @@ export default function SchedulesPage() {
             篩選與版本
           </CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-3">
+        <CardContent className="grid gap-3 lg:grid-cols-3">
           <div className="space-y-1.5">
-            <Label>機構（必選）</Label>
+            <Label className="flex h-7 items-center">機構（必選）</Label>
             <Select
               value={orgId}
               onValueChange={(v) => {
                 setOrgId(v)
                 setBranchId('all')
                 setVersionId('none')
+                setActiveVersionGroup('unapproved')
               }}
               disabled={organizations.length === 0}
             >
@@ -840,7 +996,7 @@ export default function SchedulesPage() {
             {!orgIdResolved && <p className="text-xs text-destructive mt-1">請先指定機構</p>}
           </div>
           <div className="space-y-1.5">
-            <Label>分店</Label>
+            <Label className="flex h-7 items-center">分店</Label>
             <Select value={branchId} onValueChange={setBranchId}>
               <SelectTrigger><SelectValue placeholder="選擇分店" /></SelectTrigger>
               <SelectContent>
@@ -850,14 +1006,37 @@ export default function SchedulesPage() {
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label>排班版本</Label>
+            <Label htmlFor="schedule-version-select" className="sr-only">排班版本</Label>
+            <Tabs
+              value={activeVersionGroup}
+              onValueChange={(value) => {
+                const nextGroup = value as VersionGroup
+                const nextVersions = nextGroup === 'approved' ? approvedVersions : unapprovedVersions
+                setActiveVersionGroup(nextGroup)
+                setVersionId(nextVersions[0] ? String(nextVersions[0].id) : 'none')
+                resetWorkflow()
+              }}
+            >
+              <TabsList className="grid h-7 w-full grid-cols-2 p-0.5">
+                <TabsTrigger value="unapproved" disabled={unapprovedVersions.length === 0} className="h-6 justify-center px-2 py-0 text-xs">
+                  未簽核
+                  <span className="rounded-full bg-muted px-1.5 text-[11px] tabular-nums">{unapprovedVersions.length}</span>
+                </TabsTrigger>
+                <TabsTrigger value="approved" disabled={approvedVersions.length === 0} className="h-6 justify-center px-2 py-0 text-xs">
+                  已簽核
+                  <span className="rounded-full bg-muted px-1.5 text-[11px] tabular-nums">{approvedVersions.length}</span>
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
             <Select value={versionId} onValueChange={(v) => { setVersionId(v); resetWorkflow() }} disabled={!orgIdResolved}>
-              <SelectTrigger><SelectValue placeholder="選擇排班版本" /></SelectTrigger>
+              <SelectTrigger id="schedule-version-select"><SelectValue placeholder="選擇排班版本" /></SelectTrigger>
               <SelectContent>
-                {versions.length === 0 ? (
-                  <SelectItem value="none" disabled>尚無版本</SelectItem>
+                {versionsInActiveGroup.length === 0 ? (
+                  <SelectItem value="none" disabled>
+                    {activeVersionGroup === 'approved' ? '尚無已簽核版本' : '尚無未簽核版本'}
+                  </SelectItem>
                 ) : (
-                  versions.map((v) => (
+                  versionsInActiveGroup.map((v) => (
                     <SelectItem key={v.id} value={String(v.id)}>
                       {v.version_label}（{v.version_type === 'legal' ? 'A' : 'B'}｜{v.status_display}）
                     </SelectItem>
@@ -1052,13 +1231,13 @@ export default function SchedulesPage() {
       {/* ===== 週排班表 Grid ===== */}
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle>週排班表</CardTitle>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-end gap-1 sm:gap-2">
               <Button variant="outline" size="sm" onClick={prevWeek} aria-label="上一週">
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <div className="text-sm font-medium">{dateFrom} ~ {dateTo}</div>
+              <WeekDatePicker weekStart={weekStart} onSelectDate={(date) => setWeekStart(startOfWeek(date))} />
               <Button variant="outline" size="sm" onClick={nextWeek} aria-label="下一週">
                 <ChevronRight className="h-4 w-4" />
               </Button>
@@ -1508,22 +1687,26 @@ export default function SchedulesPage() {
 
       {/* ===== Compare Dialog ===== */}
       <Dialog open={showCompareDialog} onOpenChange={setShowCompareDialog}>
-        <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>版本差異比較</DialogTitle>
-            <DialogDescription>
-              {selectedVersion ? `版本 1：${selectedVersion.version_label}（${selectedVersion.version_type === 'legal' ? 'A' : 'B'}｜${selectedVersion.status_display}）` : ''}
-            </DialogDescription>
+        <DialogContent className="max-h-[90vh] grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-5xl">
+          <DialogHeader className="px-6 pb-4 pt-6">
+            <DialogTitle className="flex items-center gap-2">
+              <GitCompareArrows className="h-5 w-5 text-primary" />
+              版本差異比較
+            </DialogTitle>
+            <DialogDescription>查看兩個版本有哪些班次新增、移除或內容異動。</DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-3 md:grid-cols-3 items-end">
+          <div className="grid items-end gap-3 border-t bg-muted/20 px-6 py-4 md:grid-cols-3">
             <div className="md:col-span-2 space-y-1.5">
-              <Label>版本 2</Label>
+              <Label>
+                比較對象
+                {selectedVersion && <span className="ml-2 font-normal text-muted-foreground">版本 1：{selectedVersion.version_label}</span>}
+              </Label>
               <Select value={compareVersion2Id} onValueChange={setCompareVersion2Id}>
                 <SelectTrigger><SelectValue placeholder="選擇另一個版本" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none" disabled>請選擇</SelectItem>
-                  {versions
+                  {visibleVersions
                     .filter((v) => !selectedVersion || v.id !== selectedVersion.id)
                     .map((v) => (
                       <SelectItem key={v.id} value={String(v.id)}>
@@ -1540,35 +1723,78 @@ export default function SchedulesPage() {
           </div>
 
           {compareResult ? (
-            <div className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-3">
-                <Card>
-                  <CardHeader className="pb-2"><CardTitle className="text-sm">只存在版本 1</CardTitle></CardHeader>
-                  <CardContent><div className="text-2xl font-bold">{compareResult.only_in_version1?.length ?? 0}</div></CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="pb-2"><CardTitle className="text-sm">只存在版本 2</CardTitle></CardHeader>
-                  <CardContent><div className="text-2xl font-bold">{compareResult.only_in_version2?.length ?? 0}</div></CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="pb-2"><CardTitle className="text-sm">欄位差異</CardTitle></CardHeader>
-                  <CardContent><div className="text-2xl font-bold">{compareResult.differences?.length ?? 0}</div></CardContent>
-                </Card>
-              </div>
-              <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm">差異明細</CardTitle></CardHeader>
-                <CardContent>
-                  <div className="max-h-72 overflow-auto font-mono text-xs bg-muted/30 rounded-md p-3 whitespace-pre-wrap">
-                    {JSON.stringify(compareResult, null, 2)}
+            <div className="min-h-0 space-y-4 overflow-y-auto border-t px-6 py-5">
+              <div className="grid items-stretch gap-3 md:grid-cols-[1fr_auto_1fr] md:items-center">
+                <div className="rounded-xl border bg-card p-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">版本 1</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <p className="font-semibold">{compareResult.version1.version_label}</p>
+                    <Badge variant="outline">{compareResult.version1.version_type === 'legal' ? 'A 法規版' : 'B 實際版'}</Badge>
+                    <Badge variant="secondary">{compareResult.version1.status_display}</Badge>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+                <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">VS</div>
+                <div className="rounded-xl border bg-card p-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">版本 2</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <p className="font-semibold">{compareResult.version2.version_label}</p>
+                    <Badge variant="outline">{compareResult.version2.version_type === 'legal' ? 'A 法規版' : 'B 實際版'}</Badge>
+                    <Badge variant="secondary">{compareResult.version2.status_display}</Badge>
+                  </div>
+                </div>
+              </div>
+
+              <Tabs value={compareFilter} onValueChange={(value) => setCompareFilter(value as CompareFilter)}>
+                <TabsList className="grid h-auto w-full grid-cols-2 gap-1 p-1 md:grid-cols-4">
+                  <TabsTrigger value="all" className="justify-center">
+                    全部 <span className="tabular-nums text-muted-foreground">{compareRows.length}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="removed" className="justify-center data-[state=active]:text-rose-700">
+                    移除 <span className="tabular-nums">{compareResult.only_in_version1.length}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="added" className="justify-center data-[state=active]:text-emerald-700">
+                    新增 <span className="tabular-nums">{compareResult.only_in_version2.length}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="changed" className="justify-center data-[state=active]:text-amber-700">
+                    異動 <span className="tabular-nums">{compareResult.differences.length}</span>
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              {groupedCompareRows.length > 0 ? (
+                <div className="space-y-5">
+                  {groupedCompareRows.map(([date, rows]) => (
+                    <section key={date} className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <CalendarDays className="h-4 w-4 text-primary" />
+                        <h3 className="text-sm font-semibold">{formatComparisonDate(date)}</h3>
+                        <span className="text-xs text-muted-foreground">{rows.length} 項</span>
+                      </div>
+                      <div className="space-y-2">
+                        {rows.map((row) => <CompareScheduleRow key={`${row.kind}-${row.key}`} row={row} />)}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed py-12 text-center">
+                  <CheckCircle className="mx-auto h-9 w-9 text-emerald-600" />
+                  <p className="mt-3 font-medium">{compareRows.length === 0 ? '兩個版本的班次完全相同' : '此分類沒有差異'}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {compareRows.length === 0 ? '沒有新增、移除或內容異動。' : '切換上方分類可查看其他差異。'}
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">選擇版本 2 後點「開始比較」即可看到差異摘要。</p>
+            <div className="min-h-0 overflow-y-auto border-t px-6 py-12 text-center">
+              <GitCompareArrows className="mx-auto h-10 w-10 text-muted-foreground/50" />
+              <p className="mt-3 font-medium">選擇另一個版本開始比較</p>
+              <p className="mt-1 text-sm text-muted-foreground">結果會整理成新增、移除與內容異動，不會顯示原始程式資料。</p>
+            </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className="border-t px-6 py-4">
             <Button variant="outline" onClick={() => setShowCompareDialog(false)}>關閉</Button>
           </DialogFooter>
         </DialogContent>

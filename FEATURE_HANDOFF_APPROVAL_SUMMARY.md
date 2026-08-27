@@ -1,6 +1,6 @@
 # 無期間版本、取消簽核與簽核總表裁決交接
 
-> 更新日期：2026-08-06
+> 更新日期：2026-08-27
 > 實作範圍：`scheduling-frontend` + `scheduling-api`
 
 ## 功能結論
@@ -82,6 +82,23 @@ Content-Type: application/json
 - 成功後改為 `draft`，清除 `approved_by`、`approved_at`。
 - 原因與欄位變動寫入 `AuditLog(action=cancel)`。
 - Schedule 的新增／修改由 serializer 阻擋非 draft 版本；刪除由 view 阻擋並回 `409`。
+
+#### 取消簽核理由的來源與後續變更手順
+
+- 「取消原因必填」是後端工程師交付的原始 `scheduling-api-0820` 契約，不是整合到現行 `scheduling-api` 後才新增的限制。
+- 原始與現行後端的 `apps/schedules/views.py::unapprove` 都會拒絕缺少或只有空白的 `reason`，並回傳 `400 { "error": "reason is required" }`。
+- 兩套程式也都有 `tests/test_approval_lock_and_unapprove.py::test_unapprove_requires_reason`；現行前端因此保留必填輸入框及 `{ reason }` request body。
+- `scheduling-api-0820` 定位為上游參考版本；後續產品若決定取消必填，不要修改此參考目錄，僅修改現行 `scheduling-api` 與 `scheduling-frontend`。
+
+若產品確認取消理由不再必填，交接執行順序如下：
+
+1. 先確認稽核政策：即使沒有理由，仍應保存操作者、時間、舊狀態、`draft` 新狀態及原簽核人／時間。
+2. 現行後端移除空白理由的 `400` 驗證；`AuditLog` 的 `changes` 應只在有提供理由時加入 `reason`，不可因此略過整筆取消簽核紀錄。
+3. 更新現行後端測試：空 body 與空白 reason 應成功、非 `approved` 仍回 `409`、成功後仍須驗證狀態清除與 AuditLog。
+4. 前端 `scheduleVersionsApi.unapprove` 與 `useUnapproveScheduleVersion` 改為不要求 reason，取消簽核 Dialog 移除輸入框，但保留破壞性操作的二次確認。
+5. 執行後端取消簽核／鎖定測試、完整前端 build，並以已簽核版本實測「取消 → 回草稿 → 可編輯」。
+
+目前決策：理由仍為必填，以上僅作為未來需求確認後的變更手順，尚未執行。
 
 ### 簽核總表 API
 

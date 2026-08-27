@@ -1,7 +1,6 @@
 import { type ReactNode } from 'react'
 import { Sidebar } from './Sidebar'
 import { TopNav } from './TopNav'
-import { Toaster } from '@/components/ui/toaster'
 
 interface MainLayoutProps {
   children: ReactNode
@@ -29,7 +28,6 @@ export function MainLayout({ children }: MainLayoutProps) {
           </div>
         </main>
       </div>
-      <Toaster />
     </div>
   )
 }

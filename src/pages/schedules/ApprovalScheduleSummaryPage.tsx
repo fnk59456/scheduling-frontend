@@ -160,6 +160,7 @@ export default function ApprovalScheduleSummaryPage() {
   }, [conflicts])
 
   const finalSchedules = useMemo(() => (timeline?.schedules ?? []).filter((schedule) => {
+    if (schedule.status === 'cancelled') return false
     const conflict = conflictByScheduleId.get(schedule.id)
     if (!conflict?.decision || conflict.decision.decision === 'coexist') return true
     return conflict.decision.selected_schedule_ids.includes(schedule.id)

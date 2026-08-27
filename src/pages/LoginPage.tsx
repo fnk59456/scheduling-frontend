@@ -54,7 +54,7 @@ export default function LoginPage() {
             <CardTitle className="text-2xl text-center">登入</CardTitle>
             <CardDescription className="text-center">
               {AUTH_MODE === 'token'
-                ? '本地開發模式：使用後端帳號密碼取得 Token'
+                ? '使用系統帳號密碼登入'
                 : '輸入您的帳號密碼以存取系統'}
             </CardDescription>
           </CardHeader>
@@ -65,7 +65,7 @@ export default function LoginPage() {
                 <Input
                   id="email"
                   type={AUTH_MODE === 'token' ? 'text' : 'email'}
-                  placeholder={AUTH_MODE === 'token' ? 'superuser username' : 'your@email.com'}
+                  placeholder={AUTH_MODE === 'token' ? '請輸入帳號' : 'your@email.com'}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required

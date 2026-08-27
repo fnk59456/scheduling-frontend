@@ -5,6 +5,8 @@ import { useAuthStore } from '@/stores/authStore'
 import { authApi } from '@/api/endpoints/auth'
 import { queryClient } from '@/api/queryClient'
 import { toast } from '@/hooks/use-toast'
+import { isAxiosError } from 'axios'
+import { parseApiErrorMessage } from '@/api/errors'
 
 type AuthMode = 'firebase' | 'token'
 const AUTH_MODE = (import.meta.env.VITE_AUTH_MODE as AuthMode | undefined) || 'firebase'
@@ -78,7 +80,13 @@ export function useAuth() {
       setUser(profile)
       toast({ title: '登入成功', description: `歡迎回來，${profile.first_name || profile.username}` })
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : '登入失敗，請檢查帳號密碼'
+      const message = isAxiosError(error)
+        ? error.response
+          ? parseApiErrorMessage(error, '登入失敗，請檢查帳號密碼')
+          : '無法連線後端，請確認 API 網址與 CORS 設定'
+        : error instanceof Error
+          ? error.message
+          : '登入失敗，請檢查帳號密碼'
       toast({ title: '登入失敗', description: message, variant: 'destructive' })
       throw error
     } finally {
