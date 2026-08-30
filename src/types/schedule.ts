@@ -32,7 +32,7 @@ export interface ScheduleVersionCreateRequest {
   period_end?: string
 }
 
-export type ScheduleStatus = 'draft' | 'assigned' | 'confirmed' | 'completed' | 'cancelled'
+export type ScheduleStatus = 'draft' | 'assigned' | 'confirmed' | 'completed' | 'cancelled' | 'leave'
 
 export interface ScheduleEmployeeLite {
   id: number

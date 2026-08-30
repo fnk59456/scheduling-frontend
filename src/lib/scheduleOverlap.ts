@@ -37,6 +37,7 @@ function overlaps(left: CandidateSchedule, right: CandidateSchedule) {
 }
 
 export function buildCrossVersionWarningMap(schedules: Schedule[]) {
+  schedules = schedules.filter((schedule) => schedule.status !== 'cancelled' && schedule.status !== 'leave')
   const map = new Map<number, Schedule[]>()
   for (let leftIndex = 0; leftIndex < schedules.length; leftIndex += 1) {
     const left = schedules[leftIndex]
@@ -61,6 +62,7 @@ export function findCandidateCrossVersionOverlaps(
   schedules: Schedule[],
   templates: ShiftTemplate[],
 ) {
+  schedules = schedules.filter((schedule) => schedule.status !== 'cancelled' && schedule.status !== 'leave')
   const template = templates.find((item) => item.id === candidate.shiftTemplateId)
   if (!template) return []
   const normalized: CandidateSchedule = {

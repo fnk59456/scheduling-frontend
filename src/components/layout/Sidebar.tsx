@@ -6,6 +6,7 @@ import {
   CalendarDays,
   Users,
   Clock,
+  CalendarX2,
   Timer,
   ShieldCheck,
   Settings,
@@ -15,6 +16,7 @@ import {
 } from 'lucide-react'
 import type { RoleName } from '@/types/auth'
 import type { LucideIcon } from 'lucide-react'
+import { useLeaveRequests } from '@/hooks/useLeaves'
 
 interface NavItem {
   name: string
@@ -56,6 +58,13 @@ const navigationSections: { title: string; items: NavItem[] }[] = [
         icon: Clock,
         color: 'bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-300',
         description: '打卡紀錄與異常標記',
+      },
+      {
+        name: '請假管理',
+        href: '/leaves',
+        icon: CalendarX2,
+        color: 'bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-300',
+        description: '請假登記、審核與餘額',
       },
     ],
   },
@@ -111,6 +120,9 @@ export function Sidebar() {
   const location = useLocation()
   const pathname = location.pathname
   const hasRole = useAuthStore((s) => s.hasRole)
+  const isSupervisor = hasRole(['admin', 'manager', 'supervisor'])
+  const pendingLeaves = useLeaveRequests({ status: 'pending' }, { enabled: isSupervisor })
+  const pendingLeaveCount = isSupervisor ? pendingLeaves.data?.count ?? 0 : 0
 
   return (
     <div className="hidden border-r bg-background/80 backdrop-blur-sm md:block w-64 shadow-sm h-full">
@@ -123,6 +135,7 @@ export function Sidebar() {
                 title={section.title}
                 items={section.items.filter((item) => !item.roles || hasRole(item.roles))}
                 pathname={pathname}
+                pendingLeaveCount={pendingLeaveCount}
               />
             ))}
           </div>
@@ -142,7 +155,12 @@ export function Sidebar() {
   )
 }
 
-function SidebarSection({ title, items, pathname }: { title: string; items: NavItem[]; pathname: string }) {
+function SidebarSection({ title, items, pathname, pendingLeaveCount }: {
+  title: string
+  items: NavItem[]
+  pathname: string
+  pendingLeaveCount: number
+}) {
   if (items.length === 0) return null
 
   return (
@@ -176,6 +194,11 @@ function SidebarSection({ title, items, pathname }: { title: string; items: NavI
                   <span className="text-[10px] text-muted-foreground font-normal truncate">{item.description}</span>
                 )}
               </div>
+              {item.href === '/leaves' && pendingLeaveCount > 0 && (
+                <span className="mr-1 min-w-5 rounded-full bg-amber-500 px-1.5 py-0.5 text-center text-[10px] font-bold text-white">
+                  {pendingLeaveCount > 99 ? '99+' : pendingLeaveCount}
+                </span>
+              )}
               {active && (
                 <span className="absolute right-1.5 top-1/2 -translate-y-1/2 w-1 h-6 bg-primary rounded-full" />
               )}

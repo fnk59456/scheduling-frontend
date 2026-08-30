@@ -7,12 +7,15 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { schedulesApi } from '@/api/endpoints/schedules'
+import { leavesApi } from '@/api/endpoints/leaves'
+import { useLeaveRequests } from '@/hooks/useLeaves'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import { buildCrossVersionWarningMap } from '@/lib/scheduleOverlap'
 import type { EmployeeListItem } from '@/types/employee'
 import type { ComplianceViolation, Schedule, ScheduleVersion } from '@/types/schedule'
 import type { ShiftTemplate } from '@/types/shift'
+import { approvedLeaveDateMap, approvedLeaveFor, workingSchedules } from '@/lib/leaveDates'
 
 type DialogOrigin = {
   x: number
@@ -123,6 +126,14 @@ export function EmployeeMonthScheduleDialog({
   }, [monthStart])
   const calendarStart = calendarDays[0]
   const calendarEnd = calendarDays[calendarDays.length - 1]
+  const approvedLeavesQuery = useLeaveRequests({
+    status: 'approved',
+    employee: employee.id,
+    date_from: formatDate(calendarStart),
+    date_to: formatDate(calendarEnd),
+  }, { enabled: open, allPages: true })
+  const approvedLeaves = approvedLeavesQuery.data?.results ?? []
+  const leaveDateMap = useMemo(() => approvedLeaveDateMap(approvedLeaves), [approvedLeaves])
   const selectedVersion = useMemo(
     () => versions.find((version) => version.id === versionId) ?? null,
     [versionId, versions],
@@ -256,7 +267,7 @@ export function EmployeeMonthScheduleDialog({
   )
 
   const totalHours = useMemo(
-    () => monthSchedules.reduce((total, schedule) => {
+    () => workingSchedules(monthSchedules).reduce((total, schedule) => {
       const hours = Number(schedule.expected_hours || schedule.shift_template.duration_hours || 0)
       return total + (Number.isFinite(hours) ? hours : 0)
     }, 0),
@@ -288,18 +299,25 @@ export function EmployeeMonthScheduleDialog({
     try {
       setExportLoading(true)
       const exportVersions = displayMode === 'stitched' ? timelineVersions : [selectedVersion]
-      const scheduleResponses = await Promise.all(
-        exportVersions.map((version) => schedulesApi.listAll({
+      const [scheduleResponses, leaveResponse] = await Promise.all([
+        Promise.all(exportVersions.map((version) => schedulesApi.listAll({
           version: version.id,
           employee: employee.id,
           date_from: exportDateFrom,
           date_to: exportDateTo,
-        })),
-      )
+        }))),
+        leavesApi.listAll({
+          status: 'approved',
+          employee: employee.id,
+          date_from: exportDateFrom,
+          date_to: exportDateTo,
+        }),
+      ])
       const exportSchedules = scheduleResponses.flatMap((response) => response.results)
       const { createScheduleWorkbook } = await import('@/lib/scheduleExcelExport')
       const buffer = await createScheduleWorkbook({
         schedules: exportSchedules,
+        leaves: leaveResponse.results,
         employees: [employee],
         dateFrom: exportDateFrom,
         dateTo: exportDateTo,
@@ -546,6 +564,9 @@ export function EmployeeMonthScheduleDialog({
                 const dateKey = formatDate(date)
                 const isCurrentMonth = date.getMonth() === month.getMonth()
                 const daySchedules = scheduleByDate.get(dateKey) ?? []
+                const dayLeaves = approvedLeaveFor(leaveDateMap, employee.id, dateKey)
+                const needsLeaveOverlay = dayLeaves.length > 0
+                  && !daySchedules.some((schedule) => schedule.status === 'leave')
                 const hasConflict = daySchedules.some((schedule) => (crossVersionWarningMap.get(schedule.id)?.length ?? 0) > 0)
 
                 return (
@@ -569,9 +590,10 @@ export function EmployeeMonthScheduleDialog({
                         && <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />}
                     </div>
 
-                    {daySchedules.length ? (
+                    {(daySchedules.length > 0 || needsLeaveOverlay) ? (
                       <div className={cn('mt-1 space-y-1', !isCurrentMonth && 'opacity-70')}>
                         {daySchedules.map((schedule) => {
+                          const isLeave = schedule.status === 'leave'
                           const templateIndex = templateIndexById.get(schedule.shift_template.id) ?? schedule.shift_template.id
                           const violation = violationByCell.get(`${dateKey}:${schedule.shift_template.id}`)
                           const crossWarnings = crossVersionWarningMap.get(schedule.id) ?? []
@@ -581,7 +603,9 @@ export function EmployeeMonthScheduleDialog({
                               key={schedule.id}
                               className={cn(
                                 'relative rounded-md border px-2 py-1.5',
-                                shiftChipColors[templateIndex % shiftChipColors.length],
+                                isLeave
+                                  ? 'border-violet-300 bg-violet-100 text-violet-800 dark:border-violet-700 dark:bg-violet-950/50 dark:text-violet-200'
+                                  : shiftChipColors[templateIndex % shiftChipColors.length],
                                 violation?.severity === 'hard' && 'border-destructive ring-1 ring-destructive/40',
                                 violation?.severity === 'soft' && 'border-amber-400 ring-1 ring-amber-300/50',
                                 crossWarnings.length > 0 && 'border-amber-400 pr-6 ring-1 ring-amber-300/50',
@@ -597,9 +621,9 @@ export function EmployeeMonthScheduleDialog({
                                 violation ? `${violation.rule_label}：${JSON.stringify(violation.detail)}` : '',
                               ].filter(Boolean).join('\n') || undefined}
                             >
-                              <div className="truncate text-xs font-semibold">{schedule.shift_template.name}</div>
+                              <div className="truncate text-xs font-semibold">{isLeave ? '請假' : schedule.shift_template.name}</div>
                               <div className="mt-0.5 whitespace-nowrap font-mono text-[10px] opacity-75">
-                                {schedule.shift_template.start_time.slice(0, 5)}-{schedule.shift_template.end_time.slice(0, 5)}
+                                {isLeave ? `原排：${schedule.shift_template.name}` : `${schedule.shift_template.start_time.slice(0, 5)}-${schedule.shift_template.end_time.slice(0, 5)}`}
                               </div>
                               {displayMode === 'stitched' && (
                                 <div className="mt-0.5 truncate text-[9px] opacity-65">
@@ -612,6 +636,17 @@ export function EmployeeMonthScheduleDialog({
                             </div>
                           )
                         })}
+                        {needsLeaveOverlay && (
+                          <div
+                            className="rounded-md border border-violet-300 bg-violet-100 px-2 py-1.5 text-violet-800 dark:border-violet-700 dark:bg-violet-950/50 dark:text-violet-200"
+                            title={dayLeaves.map((leave) => `${leave.leave_type_display}：${leave.start_date}～${leave.end_date}`).join('\n')}
+                          >
+                            <div className="truncate text-xs font-semibold">請假</div>
+                            <div className="mt-0.5 truncate text-[10px] opacity-75">
+                              {dayLeaves.map((leave) => leave.leave_type_display).join('、')}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ) : isCurrentMonth ? (
                       <div className="mt-3 text-center text-[10px] text-muted-foreground/70">未排班</div>

@@ -18,6 +18,7 @@ import EmployeePrioritiesPage from '@/pages/settings/EmployeePrioritiesPage'
 import SchedulesPage from '@/pages/schedules/SchedulesPage'
 import ApprovalScheduleSummaryPage from '@/pages/schedules/ApprovalScheduleSummaryPage'
 import AttendancePage from '@/pages/attendance/AttendancePage'
+import LeavesPage from '@/pages/leaves/LeavesPage'
 import OvertimePage from '@/pages/overtime/OvertimePage'
 import CompliancePage from '@/pages/compliance/CompliancePage'
 import AIAssistantPage from '@/pages/ai/AIAssistantPage'
@@ -70,6 +71,7 @@ function App() {
                       <Route path="/schedules" element={<SchedulesPage />} />
                       <Route path="/schedules/approved" element={<ApprovalScheduleSummaryPage />} />
                       <Route path="/attendance" element={<AttendancePage />} />
+                      <Route path="/leaves" element={<LeavesPage />} />
                       <Route path="/overtime" element={<OvertimePage />} />
                       <Route path="/compliance" element={<CompliancePage />} />
                       <Route path="/ai" element={<AIAssistantPage />} />
@@ -103,6 +105,7 @@ function App() {
                         <Route path="/schedules" element={<SchedulesPage />} />
                         <Route path="/schedules/approved" element={<ApprovalScheduleSummaryPage />} />
                         <Route path="/attendance" element={<AttendancePage />} />
+                        <Route path="/leaves" element={<LeavesPage />} />
                         <Route path="/overtime" element={<OvertimePage />} />
                         <Route path="/compliance" element={<CompliancePage />} />
                         <Route path="/ai" element={<AIAssistantPage />} />

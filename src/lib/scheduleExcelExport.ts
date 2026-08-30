@@ -1,11 +1,14 @@
 import type { Worksheet } from 'exceljs'
 import type { EmployeeListItem } from '@/types/employee'
 import type { Schedule } from '@/types/schedule'
+import type { LeaveRequest } from '@/types/leave'
+import { approvedLeaveDateMap, approvedLeaveFor, workingSchedules } from '@/lib/leaveDates'
 
 export type ScheduleExportLayout = 'personal' | 'integrated'
 
 type CreateScheduleWorkbookParams = {
   schedules: Schedule[]
+  leaves?: LeaveRequest[]
   employees?: EmployeeListItem[]
   dateFrom: string
   dateTo: string
@@ -19,6 +22,7 @@ type EmployeeScheduleGroup = {
   name: string
   position: string
   schedules: Schedule[]
+  leaves: LeaveRequest[]
 }
 
 type MonthSection = {
@@ -108,7 +112,11 @@ function employeeName(employee: EmployeeListItem) {
   return employee.user_name || fullName || employee.user.username || employee.employee_id
 }
 
-function groupSchedulesByEmployee(schedules: Schedule[], employees: EmployeeListItem[] = []) {
+function groupSchedulesByEmployee(
+  schedules: Schedule[],
+  employees: EmployeeListItem[] = [],
+  leaves: LeaveRequest[] = [],
+) {
   const groups = new Map<number, EmployeeScheduleGroup>()
 
   for (const employee of employees) {
@@ -118,6 +126,7 @@ function groupSchedulesByEmployee(schedules: Schedule[], employees: EmployeeList
       name: employeeName(employee),
       position: employee.position,
       schedules: [],
+      leaves: [],
     })
   }
 
@@ -134,6 +143,23 @@ function groupSchedulesByEmployee(schedules: Schedule[], employees: EmployeeList
       name: schedule.employee.user_name || schedule.employee.employee_id,
       position: schedule.employee.position,
       schedules: [schedule],
+      leaves: [],
+    })
+  }
+
+  for (const leave of leaves) {
+    const existing = groups.get(leave.employee)
+    if (existing) {
+      existing.leaves.push(leave)
+      continue
+    }
+    groups.set(leave.employee, {
+      id: leave.employee,
+      employeeId: leave.employee_code,
+      name: leave.employee_name || leave.employee_code,
+      position: '',
+      schedules: [],
+      leaves: [leave],
     })
   }
 
@@ -196,6 +222,7 @@ function renderEmployeeBlock(
   shiftColorById: Map<number, number>,
 ) {
   const scheduleByDate = new Map<string, Schedule[]>()
+  const leaveByDate = approvedLeaveDateMap(group.leaves)
   for (const schedule of group.schedules) {
     const schedulesForDate = scheduleByDate.get(schedule.schedule_date) ?? []
     schedulesForDate.push(schedule)
@@ -207,8 +234,9 @@ function renderEmployeeBlock(
     ))
   }
 
-  const scheduledDays = scheduleByDate.size
-  const totalHours = group.schedules.reduce((total, schedule) => {
+  const workSchedules = workingSchedules(group.schedules)
+  const scheduledDays = new Set(workSchedules.map((schedule) => schedule.schedule_date)).size
+  const totalHours = workSchedules.reduce((total, schedule) => {
     const hours = Number(schedule.expected_hours || schedule.shift_template.duration_hours || 0)
     return total + (Number.isFinite(hours) ? hours : 0)
   }, 0)
@@ -277,6 +305,9 @@ function renderEmployeeBlock(
         const schedulesForDate = belongsToMonth && isWithinRange
           ? (scheduleByDate.get(dateKey) ?? [])
           : []
+        const leavesForDate = belongsToMonth && isWithinRange
+          ? approvedLeaveFor(leaveByDate, group.id, dateKey)
+          : []
 
         cell.border = calendarBorder
         cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
@@ -288,7 +319,7 @@ function renderEmployeeBlock(
         }
 
         const dateLabel = `${date.getMonth() + 1}/${date.getDate()}（${weekdayShortLabels[index]}）`
-        if (schedulesForDate.length === 0) {
+        if (schedulesForDate.length === 0 && leavesForDate.length === 0) {
           cell.value = `${dateLabel}\n未排班`
           cell.font = { size: 9, color: { argb: 'FF7A8491' } }
           cell.fill = {
@@ -299,16 +330,23 @@ function renderEmployeeBlock(
           return
         }
 
-        const shiftLines = schedulesForDate.map((schedule) => (
-          `${schedule.shift_template.name} ${schedule.shift_template.start_time.slice(0, 5)}-${schedule.shift_template.end_time.slice(0, 5)}`
-        ))
+        const hasLeaveMarker = schedulesForDate.some((schedule) => schedule.status === 'leave')
+        const shiftLines = schedulesForDate.map((schedule) => schedule.status === 'leave'
+          ? `請假（原排：${schedule.shift_template.name}）`
+          : `${schedule.shift_template.name} ${schedule.shift_template.start_time.slice(0, 5)}-${schedule.shift_template.end_time.slice(0, 5)}`
+        )
+        if (leavesForDate.length > 0 && !hasLeaveMarker) {
+          shiftLines.push(`請假（${leavesForDate.map((leave) => leave.leave_type_display).join('、')}）`)
+        }
         cell.value = `${dateLabel}\n${shiftLines.join('\n')}`
         cell.font = { size: 9, color: { argb: 'FF17365D' } }
-        const colorIndex = shiftColorById.get(schedulesForDate[0].shift_template.id) ?? 0
+        const colorIndex = schedulesForDate.length > 0
+          ? shiftColorById.get(schedulesForDate[0].shift_template.id) ?? 0
+          : 0
         cell.fill = {
           type: 'pattern',
           pattern: 'solid',
-          fgColor: { argb: shiftFills[colorIndex % shiftFills.length] },
+          fgColor: { argb: leavesForDate.length > 0 || hasLeaveMarker ? 'FFEDE9FE' : shiftFills[colorIndex % shiftFills.length] },
         }
         maxLines = Math.max(maxLines, 1 + shiftLines.length)
       })
@@ -401,10 +439,16 @@ function styleIntegratedTitleRow(
   cell.alignment = { horizontal: 'center', vertical: 'middle' }
 }
 
-function integratedScheduleCellValue(schedules: Schedule[]) {
-  return schedules.map((schedule) => (
-    `${schedule.shift_template.name}\n${schedule.shift_template.start_time.slice(0, 5)}-${schedule.shift_template.end_time.slice(0, 5)}`
-  )).join('\n')
+function integratedScheduleCellValue(schedules: Schedule[], leaves: LeaveRequest[]) {
+  const hasLeaveMarker = schedules.some((schedule) => schedule.status === 'leave')
+  const lines = schedules.map((schedule) => schedule.status === 'leave'
+    ? `請假\n原排：${schedule.shift_template.name}`
+    : `${schedule.shift_template.name}\n${schedule.shift_template.start_time.slice(0, 5)}-${schedule.shift_template.end_time.slice(0, 5)}`
+  )
+  if (leaves.length > 0 && !hasLeaveMarker) {
+    lines.push(`請假\n${leaves.map((leave) => leave.leave_type_display).join('、')}`)
+  }
+  return lines.join('\n')
 }
 
 function renderIntegratedSchedule(
@@ -440,6 +484,7 @@ function renderIntegratedSchedule(
   })
 
   const scheduleByEmployeeAndDate = new Map<string, Schedule[]>()
+  const leaveByEmployeeAndDate = approvedLeaveDateMap(groups.flatMap((group) => group.leaves))
   for (const group of groups) {
     for (const schedule of group.schedules) {
       const key = `${group.id}:${schedule.schedule_date}`
@@ -490,7 +535,8 @@ function renderIntegratedSchedule(
     groups.forEach((group, employeeIndex) => {
       const cell = row.getCell(employeeIndex + 3)
       const schedulesForCell = scheduleByEmployeeAndDate.get(`${group.id}:${dateKey}`) ?? []
-      if (schedulesForCell.length === 0) {
+      const leavesForCell = approvedLeaveFor(leaveByEmployeeAndDate, group.id, dateKey)
+      if (schedulesForCell.length === 0 && leavesForCell.length === 0) {
         cell.value = '未排班'
         cell.font = { size: 9, color: { argb: 'FF8A94A3' } }
         cell.fill = {
@@ -501,15 +547,18 @@ function renderIntegratedSchedule(
         return
       }
 
-      cell.value = integratedScheduleCellValue(schedulesForCell)
+      cell.value = integratedScheduleCellValue(schedulesForCell, leavesForCell)
       cell.font = { size: 9, color: { argb: 'FF17365D' } }
-      const colorIndex = shiftColorById.get(schedulesForCell[0].shift_template.id) ?? 0
+      const colorIndex = schedulesForCell.length > 0
+        ? shiftColorById.get(schedulesForCell[0].shift_template.id) ?? 0
+        : 0
+      const hasLeave = leavesForCell.length > 0 || schedulesForCell.some((schedule) => schedule.status === 'leave')
       cell.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: shiftFills[colorIndex % shiftFills.length] },
+        fgColor: { argb: hasLeave ? 'FFEDE9FE' : shiftFills[colorIndex % shiftFills.length] },
       }
-      maxLines = Math.max(maxLines, schedulesForCell.length * 2)
+      maxLines = Math.max(maxLines, (schedulesForCell.length + (leavesForCell.length > 0 ? 1 : 0)) * 2)
     })
 
     for (let column = 1; column <= lastColumn; column += 1) {
@@ -536,8 +585,9 @@ function renderIntegratedSchedule(
   sheet.mergeCells(rowNumber + 1, 1, rowNumber + 1, 2)
 
   groups.forEach((group, employeeIndex) => {
-    const dates = new Set(group.schedules.map((schedule) => schedule.schedule_date))
-    const totalHours = group.schedules.reduce((total, schedule) => {
+    const workSchedules = workingSchedules(group.schedules)
+    const dates = new Set(workSchedules.map((schedule) => schedule.schedule_date))
+    const totalHours = workSchedules.reduce((total, schedule) => {
       const hours = Number(schedule.expected_hours || schedule.shift_template.duration_hours || 0)
       return total + (Number.isFinite(hours) ? hours : 0)
     }, 0)
@@ -580,6 +630,7 @@ function renderIntegratedSchedule(
 
 export async function createScheduleWorkbook({
   schedules,
+  leaves = [],
   employees,
   dateFrom,
   dateTo,
@@ -609,7 +660,7 @@ export async function createScheduleWorkbook({
   }
 
   if (layout === 'personal') {
-    const employeeGroups = groupSchedulesByEmployee(schedules, employees)
+    const employeeGroups = groupSchedulesByEmployee(schedules, employees, leaves)
     const months = buildMonthSections(dateFrom, dateTo)
     const sheet = workbook.addWorksheet('個人版表')
     configureWorksheet(sheet, versionLabel, dateFrom, dateTo)
@@ -640,7 +691,7 @@ export async function createScheduleWorkbook({
       sheet.pageSetup.printArea = `A1:G${lastContentRow}`
     }
   } else {
-    const employeeGroups = groupSchedulesByEmployee(schedules, employees)
+    const employeeGroups = groupSchedulesByEmployee(schedules, employees, leaves)
     const sheet = workbook.addWorksheet('整合班表')
     renderIntegratedSchedule(
       sheet,

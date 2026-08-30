@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { employeesApi } from '@/api/endpoints/employees'
 import { scheduleVersionsApi } from '@/api/endpoints/schedules'
 import { useDecideScheduleOverlap } from '@/hooks/useSchedules'
+import { useLeaveRequests } from '@/hooks/useLeaves'
 import { useBranches, useOrganizations } from '@/hooks/useOrganizations'
 import { cn } from '@/lib/utils'
 import type { EmployeeListItem } from '@/types/employee'
@@ -31,6 +32,7 @@ import type {
   ScheduleOverlapDecisionType,
   ScheduleVersionType,
 } from '@/types/schedule'
+import { approvedLeaveDateMap, approvedLeaveFor, isWorkingSchedule, workingSchedules } from '@/lib/leaveDates'
 
 const weekdayLabels = ['週一', '週二', '週三', '週四', '週五', '週六', '週日']
 
@@ -121,6 +123,14 @@ export default function ApprovalScheduleSummaryPage() {
   const dateFrom = formatDate(weekDays[0])
   const dateTo = formatDate(weekDays[6])
 
+  const approvedLeavesQuery = useLeaveRequests({
+    status: 'approved',
+    date_from: dateFrom,
+    date_to: dateTo,
+  }, { enabled: !!orgIdResolved, allPages: true })
+  const approvedLeaves = approvedLeavesQuery.data?.results ?? []
+  const leaveDateMap = useMemo(() => approvedLeaveDateMap(approvedLeaves), [approvedLeaves])
+
   const timelineQuery = useQuery({
     queryKey: ['approvedScheduleTimeline', orgIdResolved, branchId, track, dateFrom, dateTo],
     queryFn: () => scheduleVersionsApi.approvedTimeline({
@@ -148,7 +158,10 @@ export default function ApprovalScheduleSummaryPage() {
     [employeesQuery.data?.results],
   )
   const timeline = timelineQuery.data
-  const conflicts = timeline?.conflicts ?? []
+  const conflicts = useMemo(
+    () => (timeline?.conflicts ?? []).filter((conflict) => conflict.schedules.every(isWorkingSchedule)),
+    [timeline?.conflicts],
+  )
   const versionById = useMemo(
     () => new Map((timeline?.versions ?? []).map((version) => [version.id, version])),
     [timeline?.versions],
@@ -180,10 +193,10 @@ export default function ApprovalScheduleSummaryPage() {
   }, [dateFrom, dateTo, finalSchedules])
 
   const scheduledEmployeeCount = useMemo(
-    () => new Set(finalSchedules.map((schedule) => schedule.employee.id)).size,
+    () => new Set(workingSchedules(finalSchedules).map((schedule) => schedule.employee.id)).size,
     [finalSchedules],
   )
-  const totalHours = useMemo(() => finalSchedules.reduce((sum, schedule) => {
+  const totalHours = useMemo(() => workingSchedules(finalSchedules).reduce((sum, schedule) => {
     const value = Number(schedule.expected_hours || schedule.shift_template.duration_hours || 0)
     return sum + (Number.isFinite(value) ? value : 0)
   }, 0), [finalSchedules])
@@ -210,10 +223,10 @@ export default function ApprovalScheduleSummaryPage() {
     setActiveConflict(null)
   }
 
-  const loading = timelineQuery.isLoading || employeesQuery.isLoading
-  const fetching = timelineQuery.isFetching || employeesQuery.isFetching
-  const hasError = timelineQuery.isError || employeesQuery.isError
-  const unresolvedCount = timeline?.unresolved_conflict_count ?? 0
+  const loading = timelineQuery.isLoading || employeesQuery.isLoading || approvedLeavesQuery.isLoading
+  const fetching = timelineQuery.isFetching || employeesQuery.isFetching || approvedLeavesQuery.isFetching
+  const hasError = timelineQuery.isError || employeesQuery.isError || approvedLeavesQuery.isError
+  const unresolvedCount = conflicts.filter((conflict) => !conflict.decision).length
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -320,7 +333,7 @@ export default function ApprovalScheduleSummaryPage() {
           ) : hasError ? (
             <div className="py-12 text-center">
               <p className="text-sm text-destructive">無法載入簽核總表。</p>
-              <Button className="mt-3" variant="outline" onClick={() => { timelineQuery.refetch(); employeesQuery.refetch() }}>重試</Button>
+              <Button className="mt-3" variant="outline" onClick={() => { timelineQuery.refetch(); employeesQuery.refetch(); approvedLeavesQuery.refetch() }}>重試</Button>
             </div>
           ) : (
             <div className="overflow-x-auto rounded-md border">
@@ -333,9 +346,12 @@ export default function ApprovalScheduleSummaryPage() {
                       {weekDays.map((day) => {
                         const date = formatDate(day)
                         const schedules = schedulesByCell.get(`${employee.id}:${date}`) ?? []
+                        const leaves = approvedLeaveFor(leaveDateMap, employee.id, date)
+                        const showLeaveOverlay = leaves.length > 0 && !schedules.some((schedule) => schedule.status === 'leave')
                         return (
                           <td key={date} className="p-1.5 align-top">
-                            {schedules.length ? <div className="space-y-1">{schedules.map((schedule) => {
+                            {(schedules.length || showLeaveOverlay) ? <div className="space-y-1">{schedules.map((schedule) => {
+                              const isLeave = schedule.status === 'leave'
                               const version = versionById.get(schedule.schedule_version)
                               const conflict = conflictByScheduleId.get(schedule.id)
                               const unresolved = !!conflict && !conflict.decision
@@ -347,19 +363,33 @@ export default function ApprovalScheduleSummaryPage() {
                                   onClick={() => conflict && openDecision(conflict)}
                                   className={cn(
                                     'relative w-full rounded-md border p-2 text-left',
-                                    shiftChipColors[Math.abs(schedule.shift_template.id) % shiftChipColors.length],
+                                    isLeave
+                                      ? 'border-violet-300 bg-violet-100 text-violet-800'
+                                      : shiftChipColors[Math.abs(schedule.shift_template.id) % shiftChipColors.length],
                                     unresolved && 'border-destructive bg-destructive/10 ring-1 ring-destructive/30',
                                     coexist && 'border-emerald-400 ring-1 ring-emerald-200',
                                   )}
                                 >
-                                  <p className="pr-4 text-xs font-semibold">{schedule.shift_template.name}</p>
-                                  <p className="font-mono text-[10px] opacity-75">{schedule.shift_template.start_time.slice(0, 5)}–{schedule.shift_template.end_time.slice(0, 5)}</p>
+                                  <p className="pr-4 text-xs font-semibold">{isLeave ? '請假' : schedule.shift_template.name}</p>
+                                  <p className="font-mono text-[10px] opacity-75">{isLeave ? `原排：${schedule.shift_template.name}` : `${schedule.shift_template.start_time.slice(0, 5)}–${schedule.shift_template.end_time.slice(0, 5)}`}</p>
                                   <p className="mt-1 truncate text-[10px] opacity-70">{version?.version_label ?? `版本 #${schedule.schedule_version}`}</p>
                                   {unresolved && <AlertTriangle className="absolute bottom-2 right-2 h-3.5 w-3.5 text-destructive" />}
                                   {coexist && <CheckCircle2 className="absolute bottom-2 right-2 h-3.5 w-3.5 text-emerald-600" />}
                                 </button>
                               )
-                            })}</div> : <div className="rounded-md border border-dashed py-5 text-center text-xs text-muted-foreground">未排班</div>}
+                            })}
+                              {showLeaveOverlay && (
+                                <button
+                                  type="button"
+                                  className="w-full rounded-md border border-violet-300 bg-violet-100 p-2 text-left text-violet-800"
+                                  onClick={() => navigate('/leaves')}
+                                  title={leaves.map((leave) => `${leave.leave_type_display}：${leave.start_date}～${leave.end_date}`).join('\n')}
+                                >
+                                  <p className="text-xs font-semibold">請假</p>
+                                  <p className="mt-0.5 truncate text-[10px] opacity-75">{leaves.map((leave) => leave.leave_type_display).join('、')}</p>
+                                </button>
+                              )}
+                            </div> : <div className="rounded-md border border-dashed py-5 text-center text-xs text-muted-foreground">未排班</div>}
                           </td>
                         )
                       })}

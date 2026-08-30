@@ -45,6 +45,8 @@ import type {
 import { toast } from '@/hooks/use-toast'
 import { scheduleVersionsApi, schedulesApi } from '@/api/endpoints/schedules'
 import { employeesApi } from '@/api/endpoints/employees'
+import { leavesApi } from '@/api/endpoints/leaves'
+import { useLeaveRequests } from '@/hooks/useLeaves'
 import { cn } from '@/lib/utils'
 import {
   buildCrossVersionWarningMap,
@@ -53,6 +55,8 @@ import {
 import { EmployeeMonthScheduleDialog } from './EmployeeMonthScheduleDialog'
 import { WeekDatePicker } from './WeekDatePicker'
 import type { EmployeeListItem } from '@/types/employee'
+import type { LeaveRequest } from '@/types/leave'
+import { approvedLeaveDateMap, approvedLeaveFor, workingSchedules } from '@/lib/leaveDates'
 
 function fmtDate(d: Date) {
   const yyyy = d.getFullYear()
@@ -319,6 +323,13 @@ export default function SchedulesPage() {
   const dateFrom = fmtDate(weekDays[0])
   const dateTo = fmtDate(weekDays[6])
 
+  const approvedLeavesQuery = useLeaveRequests(
+    { status: 'approved', date_from: dateFrom, date_to: dateTo },
+    { enabled: !!selectedVersion, allPages: true },
+  )
+  const approvedLeaves = approvedLeavesQuery.data?.results ?? []
+  const leaveDateMap = useMemo(() => approvedLeaveDateMap(approvedLeaves), [approvedLeaves])
+
   const {
     data: schedulesData,
     isLoading: schedulesLoading,
@@ -404,14 +415,15 @@ export default function SchedulesPage() {
       map.set(schedule.id, messages)
     }
     const schedulesByVersionEmployeeDate = new Map<string, Schedule[]>()
-    for (const schedule of schedules) {
+    for (const schedule of workingSchedules(schedules)) {
       const key = `${schedule.schedule_version}:${schedule.employee.id}:${schedule.schedule_date}`
       schedulesByVersionEmployeeDate.set(key, [
         ...(schedulesByVersionEmployeeDate.get(key) ?? []),
         schedule,
       ])
     }
-    for (const daySchedules of schedulesByVersionEmployeeDate.values()) {
+    for (const allDaySchedules of schedulesByVersionEmployeeDate.values()) {
+      const daySchedules = workingSchedules(allDaySchedules)
       const totalHours = daySchedules.reduce(
         (total, schedule) => total + Number(schedule.expected_hours || schedule.shift_template.duration_hours || 0),
         0,
@@ -460,6 +472,31 @@ export default function SchedulesPage() {
   const [dragOver, setDragOver] = useState<{ employeeId: number; date: string } | null>(null)
   const [showUnapproveDialog, setShowUnapproveDialog] = useState(false)
   const [unapproveReason, setUnapproveReason] = useState('')
+  const [pendingLeaveAction, setPendingLeaveAction] = useState<{
+    employeeName: string
+    date: string
+    leaves: LeaveRequest[]
+    run: () => Promise<void>
+  } | null>(null)
+
+  const runWithLeaveWarning = async (
+    employeeId: number,
+    date: string,
+    run: () => Promise<void>,
+  ) => {
+    const matchedLeaves = approvedLeaveFor(leaveDateMap, employeeId, date)
+    if (matchedLeaves.length === 0) {
+      await run()
+      return
+    }
+    const employee = employees.find((item) => item.id === employeeId)
+    setPendingLeaveAction({
+      employeeName: employee?.user_name || employee?.employee_id || `員工 #${employeeId}`,
+      date,
+      leaves: matchedLeaves,
+      run,
+    })
+  }
 
   // ===== 工作流狀態 =====
   const [phase, setPhase] = useState<WorkflowPhase>('editing')
@@ -613,7 +650,11 @@ export default function SchedulesPage() {
     setDragSource(null)
     setDragOver(null)
 
-    await performDrop(src, targetEmployeeId, targetDate)
+    await runWithLeaveWarning(
+      targetEmployeeId,
+      targetDate,
+      () => performDrop(src, targetEmployeeId, targetDate),
+    )
   }
 
   const handleTimelineDrop = async (targetEmployeeId: number, targetDate: string) => {
@@ -756,23 +797,31 @@ export default function SchedulesPage() {
       shiftTemplateId: Number(scheduleForm.shift_template),
     }, validationSchedules, templates)
 
-    if (editingSchedule) {
-      await updateSchedule.mutateAsync({ id: editingSchedule.id, data: payloadBase })
-    } else {
-      await createSchedule.mutateAsync(payloadBase)
+    const save = async () => {
+      if (editingSchedule) {
+        await updateSchedule.mutateAsync({ id: editingSchedule.id, data: payloadBase })
+      } else {
+        await createSchedule.mutateAsync(payloadBase)
+      }
+      setShowScheduleDialog(false)
+      resetWorkflow()
+      if (crossVersionOverlaps.length > 0) {
+        const details = crossVersionOverlaps.slice(0, 3).map((schedule) => {
+          const version = timelineVersions.find((item) => item.id === schedule.schedule_version)
+          return `${version?.version_label ?? `版本 #${schedule.schedule_version}`} ${schedule.shift_template.start_time.slice(0, 5)}-${schedule.shift_template.end_time.slice(0, 5)}`
+        })
+        toast({
+          title: `已儲存，發現 ${crossVersionOverlaps.length} 筆跨版本重疊`,
+          description: `${scheduleForm.schedule_date}：${details.join('、')}。簽核不會被阻擋，請於簽核總表裁決。`,
+        })
+      }
     }
-    setShowScheduleDialog(false)
-    resetWorkflow()
-    if (crossVersionOverlaps.length > 0) {
-      const details = crossVersionOverlaps.slice(0, 3).map((schedule) => {
-        const version = timelineVersions.find((item) => item.id === schedule.schedule_version)
-        return `${version?.version_label ?? `版本 #${schedule.schedule_version}`} ${schedule.shift_template.start_time.slice(0, 5)}-${schedule.shift_template.end_time.slice(0, 5)}`
-      })
-      toast({
-        title: `已儲存，發現 ${crossVersionOverlaps.length} 筆跨版本重疊`,
-        description: `${scheduleForm.schedule_date}：${details.join('、')}。簽核不會被阻擋，請於簽核總表裁決。`,
-      })
+
+    if (payloadBase.status === 'leave') {
+      await save()
+      return
     }
+    await runWithLeaveWarning(Number(scheduleForm.employee), scheduleForm.schedule_date, save)
   }
 
   // ===== 版本比較 =====
@@ -878,7 +927,7 @@ export default function SchedulesPage() {
     }
     try {
       setExportLoading(true)
-      const [scheduleResponse, employeeResponse] = await Promise.all([
+      const [scheduleResponse, employeeResponse, leaveResponse] = await Promise.all([
         schedulesApi.listAll({
           version: selectedVersion.id,
           date_from: exportDateFrom,
@@ -891,12 +940,18 @@ export default function SchedulesPage() {
             ? (selectedVersion.branch ?? undefined)
             : Number(branchId),
         }),
+        leavesApi.listAll({
+          status: 'approved',
+          date_from: exportDateFrom,
+          date_to: exportDateTo,
+        }),
       ])
 
       const versionLabel = `${selectedVersion.version_label}（${selectedVersion.version_type === 'legal' ? 'A 法規版' : 'B 實際版'}）`
       const { createScheduleWorkbook } = await import('@/lib/scheduleExcelExport')
       const buffer = await createScheduleWorkbook({
         schedules: scheduleResponse.results,
+        leaves: leaveResponse.results,
         employees: employeeResponse?.results,
         dateFrom: exportDateFrom,
         dateTo: exportDateTo,
@@ -1319,6 +1374,9 @@ export default function SchedulesPage() {
                         const date = fmtDate(d)
                         const key = `${e.id}:${date}`
                         const cellSchedules = scheduleByEmployeeDate.get(key) ?? []
+                        const cellLeaves = approvedLeaveFor(leaveDateMap, e.id, date)
+                        const needsLeaveOverlay = cellLeaves.length > 0
+                          && !cellSchedules.some((schedule) => schedule.status === 'leave')
                         const isDragTarget = dragOver?.employeeId === e.id && dragOver?.date === date
                         const resolution = versionResolutionByDate.get(date)
                         const ownerVersion = resolution?.version ?? null
@@ -1349,9 +1407,10 @@ export default function SchedulesPage() {
                               handleTimelineDrop(e.id, date)
                             }}
                           >
-                            {cellSchedules.length ? (
+                            {(cellSchedules.length > 0 || needsLeaveOverlay) ? (
                               <div className="space-y-1">
                                 {cellSchedules.map((schedule) => {
+                                  const isLeave = schedule.status === 'leave'
                                   const templateIndex = templates.findIndex((t) => t.id === schedule.shift_template.id)
                                   const chip = shiftChipColors[(templateIndex >= 0 ? templateIndex : 0) % shiftChipColors.length]
                                   const violation = violationMap.get(`${e.id}:${date}:${schedule.shift_template.id}`)
@@ -1359,8 +1418,10 @@ export default function SchedulesPage() {
                                   const crossVersionSchedules = crossVersionWarningMap.get(schedule.id) ?? []
                                   const isHard = violation?.severity === 'hard' || warnings.length > 0
                                   const isCrossVersionWarning = crossVersionSchedules.length > 0
-                                  const isSoft = (violation?.severity === 'soft' || isCrossVersionWarning) && !isHard
+                                  const isScheduledOnLeave = !isLeave && cellLeaves.length > 0
+                                  const isSoft = (violation?.severity === 'soft' || isCrossVersionWarning || isScheduledOnLeave) && !isHard
                                   const title = [
+                                    ...(isScheduledOnLeave ? [`請假警告：${cellLeaves.map((leave) => leave.leave_type_display).join('、')}已核准，仍允許手動排班`] : []),
                                     ...warnings,
                                     ...crossVersionSchedules.map((other) => {
                                       const otherVersion = timelineVersions.find((version) => version.id === other.schedule_version)
@@ -1371,9 +1432,9 @@ export default function SchedulesPage() {
                                   return (
                                     <div
                                       key={schedule.id}
-                                      draggable={canEditSelectedVersion}
+                                      draggable={canEditSelectedVersion && !isLeave}
                                       onDragStart={() => {
-                                        if (!canEditSelectedVersion) return
+                                        if (!canEditSelectedVersion || isLeave) return
                                         setDragSource({
                                           id: schedule.id,
                                           employeeId: e.id,
@@ -1386,7 +1447,7 @@ export default function SchedulesPage() {
                                       }}
                                       onDragEnd={() => { setDragSource(null); setDragOver(null) }}
                                       className={cn(
-                                        canEditSelectedVersion ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
+                                        canEditSelectedVersion && !isLeave ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
                                         dragSource?.id === schedule.id && 'opacity-40',
                                       )}
                                     >
@@ -1394,7 +1455,9 @@ export default function SchedulesPage() {
                                         type="button"
                                         className={cn(
                                           'relative w-full rounded-md border px-2 py-2 text-left transition hover:shadow-sm',
-                                          isHard
+                                          isLeave
+                                            ? 'border-violet-300 bg-violet-100 text-violet-800 dark:border-violet-700 dark:bg-violet-950/50 dark:text-violet-200'
+                                            : isHard
                                             ? 'border-destructive bg-destructive/10 ring-1 ring-destructive/30'
                                             : isSoft
                                               ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-300/40'
@@ -1404,14 +1467,14 @@ export default function SchedulesPage() {
                                         title={title || undefined}
                                       >
                                         <div className="pr-3">
-                                          <div className={cn('truncate text-xs font-semibold', isHard ? 'text-destructive' : isSoft ? 'text-amber-700' : chip.text)}>
-                                            {schedule.shift_template.name}
+                                          <div className={cn('truncate text-xs font-semibold', isLeave ? 'text-violet-800 dark:text-violet-200' : isHard ? 'text-destructive' : isSoft ? 'text-amber-700' : chip.text)}>
+                                            {isLeave ? '請假' : schedule.shift_template.name}
                                           </div>
                                           <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-                                            {schedule.shift_template.start_time.slice(0, 5)}-{schedule.shift_template.end_time.slice(0, 5)}
+                                            {isLeave ? `原排：${schedule.shift_template.name}` : `${schedule.shift_template.start_time.slice(0, 5)}-${schedule.shift_template.end_time.slice(0, 5)}`}
                                           </div>
                                         </div>
-                                        {(isHard || isSoft) && (
+                                        {(isHard || isSoft) && !isLeave && (
                                           <AlertTriangle className={cn(
                                             'absolute bottom-1.5 right-1.5 h-3 w-3',
                                             isHard ? 'text-destructive' : 'text-amber-600',
@@ -1421,6 +1484,24 @@ export default function SchedulesPage() {
                                     </div>
                                   )
                                 })}
+                                {needsLeaveOverlay && (
+                                  <button
+                                    type="button"
+                                    className="w-full rounded-md border border-violet-300 bg-violet-100 px-2 py-2 text-left text-violet-800 transition hover:shadow-sm dark:border-violet-700 dark:bg-violet-950/50 dark:text-violet-200"
+                                    onClick={() => {
+                                      if (canEditSelectedVersion) openCreateScheduleAt(e.id, d)
+                                      else navigate('/leaves')
+                                    }}
+                                    title={canEditSelectedVersion
+                                      ? `已核准請假；點擊仍可手動排班。\n${cellLeaves.map((leave) => `${leave.leave_type_display}：${leave.start_date}～${leave.end_date}`).join('\n')}`
+                                      : cellLeaves.map((leave) => `${leave.leave_type_display}：${leave.start_date}～${leave.end_date}`).join('\n')}
+                                  >
+                                    <div className="truncate text-xs font-semibold">請假</div>
+                                    <div className="mt-0.5 truncate text-[10px] opacity-75">
+                                      {cellLeaves.map((leave) => leave.leave_type_display).join('、')}
+                                    </div>
+                                  </button>
+                                )}
                               </div>
                             ) : (
                               <button
@@ -1516,6 +1597,42 @@ export default function SchedulesPage() {
             </Button>
           </DialogFooter>
         </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!pendingLeaveAction} onOpenChange={(open) => !open && setPendingLeaveAction(null)}>
+        {pendingLeaveAction && (
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="h-5 w-5" />請假日排班警告
+              </DialogTitle>
+              <DialogDescription>
+                {pendingLeaveAction.employeeName} 在 {pendingLeaveAction.date} 已有核准請假。依目前規則仍可手動排班，但請先確認。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/70 p-4 text-sm dark:border-amber-800/50 dark:bg-amber-950/20">
+              {pendingLeaveAction.leaves.map((leave) => (
+                <div key={leave.id} className="flex items-center justify-between gap-3">
+                  <span className="font-medium">{leave.leave_type_display}</span>
+                  <span className="text-xs text-muted-foreground">{leave.start_date}～{leave.end_date}</span>
+                </div>
+              ))}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setPendingLeaveAction(null)}>返回修改</Button>
+              <Button
+                className="bg-amber-600 text-white hover:bg-amber-700"
+                onClick={async () => {
+                  const action = pendingLeaveAction
+                  setPendingLeaveAction(null)
+                  await action.run()
+                }}
+              >
+                確認仍要排班
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
       </Dialog>
 
       {monthScheduleEmployee && selectedVersion && (
@@ -1641,6 +1758,7 @@ export default function SchedulesPage() {
                 <Select value={scheduleForm.status} onValueChange={(v) => setScheduleForm((p) => ({ ...p, status: v as ScheduleStatus }))}>
                   <SelectTrigger><SelectValue placeholder="選擇狀態" /></SelectTrigger>
                   <SelectContent>
+                    {editingSchedule?.status === 'leave' && <SelectItem value="leave">請假（由請假單同步）</SelectItem>}
                     <SelectItem value="draft">草稿</SelectItem>
                     <SelectItem value="assigned">已指派</SelectItem>
                     <SelectItem value="confirmed">已確認</SelectItem>

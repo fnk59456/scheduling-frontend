@@ -7,10 +7,14 @@ import { toast } from '@/hooks/use-toast'
 const EMPLOYEES_KEY = ['employees']
 const CERTIFICATIONS_KEY = ['certifications']
 
-export function useEmployees(params?: { search?: string; is_active?: boolean; organization?: number; branch?: number }) {
+export function useEmployees(
+  params?: { search?: string; is_active?: boolean; organization?: number; branch?: number },
+  options?: { enabled?: boolean; allPages?: boolean },
+) {
   return useQuery({
-    queryKey: [...EMPLOYEES_KEY, params],
-    queryFn: () => employeesApi.list(params),
+    queryKey: [...EMPLOYEES_KEY, options?.allPages ? 'all' : 'page', params],
+    queryFn: () => options?.allPages ? employeesApi.listAll(params) : employeesApi.list(params),
+    enabled: options?.enabled ?? true,
   })
 }
 
