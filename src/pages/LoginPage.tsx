@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { CalendarDays, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { BrandLogo } from '@/components/BrandLogo'
 import { useAuth } from '@/hooks/useAuth'
 
 type AuthMode = 'firebase' | 'token'
@@ -40,9 +41,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 p-4">
       <div className="w-full max-w-md space-y-8">
         <div className="flex flex-col items-center gap-4">
-          <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center shadow-lg">
-            <CalendarDays className="h-9 w-9 text-primary-foreground" />
-          </div>
+          <BrandLogo className="h-20 w-20 rounded-3xl shadow-lg ring-1 ring-border/60" />
           <div className="text-center">
             <h1 className="text-3xl font-bold tracking-tight">AI 智慧排班系統</h1>
             <p className="text-muted-foreground mt-1">智慧排班・合規管理・高效營運</p>

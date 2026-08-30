@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Bell, Moon, Sun, Menu, Search, User, LogOut, X, CalendarDays } from 'lucide-react'
+import { Bell, Moon, Sun, Menu, Search, User, LogOut, X } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/hooks/useAuth'
 import type { RoleName } from '@/types/auth'
+import { BrandLogo } from '@/components/BrandLogo'
 
 const roleLabels: Record<RoleName, string> = {
   admin: '系統管理員',
@@ -49,9 +50,7 @@ export function TopNav() {
             {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
           <a href="/" className="flex items-center gap-2.5">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary via-blue-500 to-indigo-600 flex items-center justify-center shadow-sm">
-              <CalendarDays className="h-5 w-5 text-primary-foreground" />
-            </div>
+            <BrandLogo className="h-9 w-9 rounded-xl shadow-sm ring-1 ring-border/60" />
             <div className="text-left hidden md:block">
               <div className="font-bold text-[15px] leading-tight">AI 智慧排班</div>
               <div className="text-[10px] text-muted-foreground leading-tight">Scheduling System · MVP</div>
