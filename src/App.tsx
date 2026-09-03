@@ -14,6 +14,7 @@ import OrganizationsPage from '@/pages/settings/OrganizationsPage'
 import ShiftTemplatesPage from '@/pages/settings/ShiftTemplatesPage'
 import ShiftRulesPage from '@/pages/settings/ShiftRulesPage'
 import CertificationsPage from '@/pages/settings/CertificationsPage'
+import LeaveSettingsPage from '@/pages/settings/LeaveSettingsPage'
 import EmployeePrioritiesPage from '@/pages/settings/EmployeePrioritiesPage'
 import SchedulesPage from '@/pages/schedules/SchedulesPage'
 import ApprovalScheduleSummaryPage from '@/pages/schedules/ApprovalScheduleSummaryPage'
@@ -65,6 +66,7 @@ function App() {
                         <Route path="rules" element={<ShiftRulesPage />} />
                         <Route path="organizations" element={<OrganizationsPage />} />
                         <Route path="certifications" element={<CertificationsPage />} />
+                        <Route path="leaves" element={<LeaveSettingsPage />} />
                       </Route>
 
                       {/* 後續週次功能佔位 */}
@@ -99,6 +101,7 @@ function App() {
                           <Route path="shifts" element={<ShiftTemplatesPage />} />
                           <Route path="rules" element={<ShiftRulesPage />} />
                           <Route path="certifications" element={<CertificationsPage />} />
+                          <Route path="leaves" element={<LeaveSettingsPage />} />
                         </Route>
 
                         {/* 後續週次功能佔位 */}

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Plus, Trash2, FileText, Award, Loader2, User,
@@ -13,62 +13,53 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
-  useEmployee, useUpdateEmployee, useAddContract, useAddCertification,
-  useRemoveCertification, useCertifications,
+  useAddContract, useAddCertification, useAddEmployeeTimeSlot, useCertifications,
+  useEmployee, useEmployeeAvailability, useRemoveCertification,
+  useRemoveEmployeeTimeSlot, useUpdateEmployeeAvailability,
 } from '@/hooks/useEmployees'
 import { EmployeeFormDialog } from './EmployeeFormDialog'
-import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
-import type { ContractType } from '@/types/employee'
+import type { Certification, ContractType, SlotType } from '@/types/employee'
 
 const contractTypeLabels: Record<string, string> = { full_time: '全職', part_time: '兼職', dispatch: '派遣' }
 
-type SlotType = 'blocked' | 'preferred'
-
-interface AvailSlot {
-  id: number
-  slot_type: SlotType
-  day: number | null
-  start: string
-  end: string
-  label: string
-}
-
 const DAY_LABELS = ['週一', '週二', '週三', '週四', '週五', '週六', '週日']
-
-const defaultSlots: AvailSlot[] = [
-  { id: 1, slot_type: 'blocked',   day: 0,    start: '17:00', end: '22:00', label: '接小孩' },
-  { id: 2, slot_type: 'blocked',   day: 2,    start: '14:00', end: '18:00', label: '進修課程' },
-  { id: 3, slot_type: 'preferred', day: null, start: '08:00', end: '16:00', label: '偏好早班' },
-  { id: 4, slot_type: 'preferred', day: 5,    start: '09:00', end: '17:00', label: '週末可支援' },
-]
+const EVERY_DAY_VALUE = '__every_day__'
 
 export default function EmployeeDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const employeeId = Number(id)
   const { data: employee, isLoading } = useEmployee(employeeId)
-  const updateEmployee = useUpdateEmployee()
   const addContract = useAddContract()
   const addCert = useAddCertification()
   const removeCert = useRemoveCertification()
   const { data: allCertsData } = useCertifications()
+  const availabilityQuery = useEmployeeAvailability(employeeId)
+  const updateAvailability = useUpdateEmployeeAvailability()
+  const addTimeSlot = useAddEmployeeTimeSlot()
+  const removeTimeSlot = useRemoveEmployeeTimeSlot()
 
   const [showContractDialog, setShowContractDialog] = useState(false)
   const [showCertDialog, setShowCertDialog] = useState(false)
   const [showEditDialog, setShowEditDialog] = useState(false)
   const [selectedCert, setSelectedCert] = useState('')
+  const [certToRemove, setCertToRemove] = useState<Certification | null>(null)
   const [contractForm, setContractForm] = useState({
     contract_type: 'full_time' as ContractType,
     start_date: '', end_date: '', base_salary: '', agreed_hours_per_week: '40', notes: '',
   })
 
-  // Availability state
-  const [slots, setSlots] = useState<AvailSlot[]>(defaultSlots)
   const [showAddSlot, setShowAddSlot] = useState(false)
-  const [slotForm, setSlotForm] = useState({ slot_type: 'blocked' as SlotType, day: '', start: '', end: '', label: '' })
-  const [availHours, setAvailHours] = useState('40')
-  const [availRules, setAvailRules] = useState('每週至少排 1 天休息日，偏好上午班別')
+  const [slotForm, setSlotForm] = useState({ slot_type: 'blocked' as SlotType, day: EVERY_DAY_VALUE, start: '', end: '', label: '' })
+  const [availHours, setAvailHours] = useState('')
+  const [availRules, setAvailRules] = useState('')
+
+  useEffect(() => {
+    if (availabilityQuery.isLoading || !employee) return
+    setAvailHours(availabilityQuery.data?.required_hours_per_week ?? employee.agreed_hours_per_week ?? '')
+    setAvailRules(availabilityQuery.data?.special_rules ?? '')
+  }, [availabilityQuery.data, availabilityQuery.isLoading, employee])
 
   if (isLoading) {
     return (
@@ -91,6 +82,7 @@ export default function EmployeeDetailPage() {
   const employeeCertIds = employee.certifications.map((c) => c.id)
   const availableCerts = allCerts.filter((c) => !employeeCertIds.includes(c.id))
   const displayName = `${employee.user.last_name}${employee.user.first_name}`.trim() || employee.user.username
+  const slots = availabilityQuery.data?.time_slots ?? []
 
   const handleAddContract = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -117,21 +109,37 @@ export default function EmployeeDetailPage() {
     setSelectedCert('')
   }
 
-  const addSlot = () => {
-    setSlots((prev) => [
-      ...prev,
-      {
-        id: Date.now(),
+  const handleSaveAvailability = async () => {
+    await updateAvailability.mutateAsync({
+      employeeId,
+      data: {
+        required_hours_per_week: availHours.trim() ? Number(availHours) : null,
+        special_rules: availRules,
+        effective_from: null,
+        effective_to: null,
+      },
+    })
+  }
+
+  const handleAddSlot = async () => {
+    await addTimeSlot.mutateAsync({
+      employeeId,
+      data: {
         slot_type: slotForm.slot_type,
-        day: slotForm.day === '' ? null : Number(slotForm.day),
-        start: slotForm.start,
-        end: slotForm.end,
+        day_of_week: slotForm.day === EVERY_DAY_VALUE ? null : Number(slotForm.day) as 0 | 1 | 2 | 3 | 4 | 5 | 6,
+        start_time: slotForm.start,
+        end_time: slotForm.end,
         label: slotForm.label,
       },
-    ])
+    })
     setShowAddSlot(false)
-    setSlotForm({ slot_type: 'blocked', day: '', start: '', end: '', label: '' })
-    toast({ title: '新增成功', description: '時段已加入' })
+    setSlotForm({ slot_type: 'blocked', day: EVERY_DAY_VALUE, start: '', end: '', label: '' })
+  }
+
+  const handleRemoveCert = async () => {
+    if (!certToRemove) return
+    await removeCert.mutateAsync({ employeeId, certificationId: certToRemove.id })
+    setCertToRemove(null)
   }
 
   return (
@@ -161,9 +169,6 @@ export default function EmployeeDetailPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => setShowEditDialog(true)}>編輯</Button>
-          <Button variant="outline" size="sm" onClick={() => updateEmployee.mutate({ id: employeeId, data: { is_active: !employee.is_active } })}>
-            {employee.is_active ? '設為離職' : '設為在職'}
-          </Button>
         </div>
       </div>
 
@@ -217,8 +222,8 @@ export default function EmployeeDetailPage() {
                 <CardTitle className="text-sm">持有證照（{employee.certifications.length}）</CardTitle>
                 <CardDescription>管理員工的專業證照</CardDescription>
               </div>
-              <Button size="sm" onClick={() => setShowCertDialog(true)} disabled={availableCerts.length === 0}>
-                <Plus className="h-3.5 w-3.5 mr-1" />新增
+              <Button size="sm" onClick={() => setShowCertDialog(true)}>
+                <Plus className="h-3.5 w-3.5 mr-1" />指派證照
               </Button>
             </CardHeader>
             <CardContent>
@@ -239,7 +244,8 @@ export default function EmployeeDetailPage() {
                       </div>
                       <Button
                         variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
-                        onClick={() => removeCert.mutate({ employeeId, certificationId: cert.id })}
+                        onClick={() => setCertToRemove(cert)}
+                        aria-label={`移除${cert.name}`}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -259,8 +265,11 @@ export default function EmployeeDetailPage() {
                 <CardTitle>可用性與偏好時段</CardTitle>
                 <CardDescription>不可排時段將被排班引擎排除；偏好時段 AI 會優先安排</CardDescription>
               </div>
-              <Button size="sm" onClick={() => toast({ title: '儲存成功', description: '可用性設定已更新' })}>
-                <Check className="h-3.5 w-3.5 mr-1" />儲存設定
+              <Button size="sm" onClick={handleSaveAvailability} disabled={availabilityQuery.isLoading || updateAvailability.isPending}>
+                {updateAvailability.isPending
+                  ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                  : <Check className="h-3.5 w-3.5 mr-1" />}
+                儲存設定
               </Button>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -281,24 +290,24 @@ export default function EmployeeDetailPage() {
                   <Label>備註 / 特殊規則</Label>
                   <Input value={availRules} onChange={(e) => setAvailRules(e.target.value)} />
                 </div>
-                <div className="space-y-1.5">
-                  <Label>生效起日</Label>
-                  <Input type="date" defaultValue="2026-01-01" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>生效迄日</Label>
-                  <Input type="date" />
-                </div>
               </div>
 
               <div className="flex items-center justify-between pt-3 border-t">
                 <div className="font-medium text-sm">時段設定（{slots.length}）</div>
-                <Button size="sm" variant="outline" onClick={() => setShowAddSlot(true)}>
+                <Button size="sm" variant="outline" onClick={() => setShowAddSlot(true)} disabled={availabilityQuery.isLoading}>
                   <Plus className="h-3.5 w-3.5 mr-1" />新增時段
                 </Button>
               </div>
 
               <div className="space-y-2">
+                {availabilityQuery.isLoading && (
+                  <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />載入可用性設定
+                  </div>
+                )}
+                {availabilityQuery.isError && (
+                  <div className="py-8 text-center text-sm text-destructive">無法載入可用性設定，請稍後重試。</div>
+                )}
                 {slots.map((s) => (
                   <div
                     key={s.id}
@@ -319,25 +328,24 @@ export default function EmployeeDetailPage() {
                       {s.slot_type === 'blocked' ? '不可排' : '偏好'}
                     </Badge>
                     <span className="font-medium text-sm w-14">
-                      {s.day === null ? '每天' : DAY_LABELS[s.day]}
+                      {s.day_of_week === null ? '每天' : DAY_LABELS[s.day_of_week]}
                     </span>
-                    <span className="font-mono text-sm">{s.start} – {s.end}</span>
+                    <span className="font-mono text-sm">{s.start_time.slice(0, 5)} – {s.end_time.slice(0, 5)}</span>
                     <span className="text-sm text-muted-foreground flex-1 truncate">
                       備註：{s.label || '無'}
                     </span>
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => {
-                        setSlots((prev) => prev.filter((x) => x.id !== s.id))
-                        toast({ title: '移除成功', description: '時段已刪除' })
-                      }}
+                      onClick={() => removeTimeSlot.mutate({ employeeId, slotId: s.id })}
+                      disabled={removeTimeSlot.isPending}
+                      aria-label="刪除時段"
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
                   </div>
                 ))}
-                {slots.length === 0 && (
+                {!availabilityQuery.isLoading && !availabilityQuery.isError && slots.length === 0 && (
                   <div className="py-8 text-center text-sm text-muted-foreground">尚未設定任何時段</div>
                 )}
               </div>
@@ -398,6 +406,7 @@ export default function EmployeeDetailPage() {
         open={showEditDialog}
         onOpenChange={setShowEditDialog}
         employee={employee}
+        onDeleted={() => navigate('/employees')}
       />
 
       {/* Add Slot Dialog */}
@@ -423,7 +432,7 @@ export default function EmployeeDetailPage() {
               <Select value={slotForm.day} onValueChange={(v) => setSlotForm((p) => ({ ...p, day: v }))}>
                 <SelectTrigger><SelectValue placeholder="每天" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">每天</SelectItem>
+                  <SelectItem value={EVERY_DAY_VALUE}>每天</SelectItem>
                   {DAY_LABELS.map((l, i) => <SelectItem key={i} value={String(i)}>{l}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -447,7 +456,10 @@ export default function EmployeeDetailPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddSlot(false)}>取消</Button>
-            <Button onClick={addSlot} disabled={!slotForm.start || !slotForm.end}>新增</Button>
+            <Button onClick={handleAddSlot} disabled={!slotForm.start || !slotForm.end || addTimeSlot.isPending}>
+              {addTimeSlot.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              新增
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -509,18 +521,53 @@ export default function EmployeeDetailPage() {
       <Dialog open={showCertDialog} onOpenChange={setShowCertDialog}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>新增證照</DialogTitle>
-            <DialogDescription>選擇要新增的證照</DialogDescription>
+            <DialogTitle>指派證照</DialogTitle>
+            <DialogDescription>從主管已建立的證照類型中選擇並指派給員工。</DialogDescription>
           </DialogHeader>
-          <Select value={selectedCert} onValueChange={setSelectedCert}>
-            <SelectTrigger><SelectValue placeholder="選擇證照" /></SelectTrigger>
-            <SelectContent>
-              {availableCerts.map((c) => <SelectItem key={c.id} value={String(c.id)}>{c.name} ({c.code})</SelectItem>)}
-            </SelectContent>
-          </Select>
+          {availableCerts.length > 0 ? (
+            <Select value={selectedCert} onValueChange={setSelectedCert}>
+              <SelectTrigger><SelectValue placeholder="選擇證照" /></SelectTrigger>
+              <SelectContent>
+                {availableCerts.map((c) => <SelectItem key={c.id} value={String(c.id)}>{c.name} ({c.code})</SelectItem>)}
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              沒有其他可指派的證照。若需要新的證照類型，請先前往系統設定建立。
+            </div>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCertDialog(false)}>取消</Button>
-            <Button onClick={handleAddCert} disabled={!selectedCert || addCert.isPending}>新增</Button>
+            <Button
+              variant={availableCerts.length === 0 ? 'default' : 'outline'}
+              onClick={() => {
+                setShowCertDialog(false)
+                navigate('/settings/certifications')
+              }}
+            >
+              建立新證照類型
+            </Button>
+            {availableCerts.length > 0 && (
+              <Button onClick={handleAddCert} disabled={!selectedCert || addCert.isPending}>指派</Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!certToRemove} onOpenChange={(open) => !open && setCertToRemove(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>移除員工證照</DialogTitle>
+            <DialogDescription>
+              確定要從 {displayName} 移除「{certToRemove?.name}」嗎？這可能影響後續排班資格判定。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCertToRemove(null)} disabled={removeCert.isPending}>取消</Button>
+            <Button variant="destructive" onClick={handleRemoveCert} disabled={removeCert.isPending}>
+              {removeCert.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              確認移除
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

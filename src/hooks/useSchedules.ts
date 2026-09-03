@@ -62,7 +62,7 @@ export function useApproveScheduleVersion() {
 export function useUnapproveScheduleVersion() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) =>
       scheduleVersionsApi.unapprove(id, reason),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: VERSIONS_KEY })
@@ -105,9 +105,9 @@ export function useCreateDualVersions() {
     mutationFn: (legalVersionId: number) => scheduleVersionsApi.createDualVersions(legalVersionId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: VERSIONS_KEY })
-      toast({ title: '建立成功', description: '已建立實際版並複製排班' })
+      toast({ title: '建立成功', description: '已建立新版本並複製排班' })
     },
-    onError: () => toast({ title: '建立失敗', description: '無法建立雙軌版本', variant: 'destructive' }),
+    onError: () => toast({ title: '建立失敗', description: '無法建立新的排班版本', variant: 'destructive' }),
   })
 }
 
@@ -185,7 +185,7 @@ export function useDeriveLegal() {
       scheduleVersionsApi.deriveLegal(bVersionId, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: VERSIONS_KEY })
-      toast({ title: '派生成功', description: '已產生法規版 (A) 班表' })
+      toast({ title: '產生成功', description: '已產生調整後的排班版本' })
     },
     onError: (err) => {
       if (axios.isAxiosError(err)) {
@@ -196,11 +196,11 @@ export function useDeriveLegal() {
           return
         }
         if (status === 409) {
-          toast({ title: '無法產生合規班表', description: String(data?.error ?? '勞基法規則無法滿足，請調整人力或規則'), variant: 'destructive' })
+          toast({ title: '無法產生調整版本', description: String(data?.error ?? '勞基法規則無法滿足，請調整人力或規則'), variant: 'destructive' })
           return
         }
       }
-      toast({ title: '派生失敗', description: '無法派生法規版班表', variant: 'destructive' })
+      toast({ title: '產生失敗', description: '無法產生調整後的排班版本', variant: 'destructive' })
     },
   })
 }

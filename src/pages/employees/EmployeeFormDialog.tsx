@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
-import { useCreateEmployee, useUpdateEmployee } from '@/hooks/useEmployees'
+import { useCreateEmployee, useDeleteEmployee, useUpdateEmployee } from '@/hooks/useEmployees'
 import { useBranches, useOrganizations } from '@/hooks/useOrganizations'
 import type { ContractType, Employee } from '@/types/employee'
 
@@ -13,6 +13,7 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   employee?: Employee
+  onDeleted?: () => void
 }
 
 const emptyForm = {
@@ -22,10 +23,11 @@ const emptyForm = {
   agreed_hours_per_week: '40', hire_date: '',
 }
 
-export function EmployeeFormDialog({ open, onOpenChange, employee }: Props) {
+export function EmployeeFormDialog({ open, onOpenChange, employee, onDeleted }: Props) {
   const isEdit = !!employee
   const createEmployee = useCreateEmployee()
   const updateEmployee = useUpdateEmployee()
+  const deleteEmployee = useDeleteEmployee()
   const {
     data: orgsData,
     isLoading: orgsLoading,
@@ -43,6 +45,7 @@ export function EmployeeFormDialog({ open, onOpenChange, employee }: Props) {
   const branches = branchesData?.results ?? []
 
   const [form, setForm] = useState(emptyForm)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -122,12 +125,30 @@ export function EmployeeFormDialog({ open, onOpenChange, employee }: Props) {
     setForm(emptyForm)
   }
 
+  const openDeleteConfirm = () => {
+    onOpenChange(false)
+    setShowDeleteConfirm(true)
+  }
+
+  const cancelDelete = () => {
+    setShowDeleteConfirm(false)
+    onOpenChange(true)
+  }
+
+  const handleDelete = async () => {
+    if (!employee) return
+    await deleteEmployee.mutateAsync(employee.id)
+    setShowDeleteConfirm(false)
+    onDeleted?.()
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? '編輯員工' : '新增員工'}</DialogTitle>
-          <DialogDescription>填寫員工基本資料以建立新的員工帳號</DialogDescription>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{isEdit ? '編輯員工' : '新增員工'}</DialogTitle>
+          <DialogDescription>{isEdit ? '更新員工基本資料與帳號設定' : '填寫員工基本資料以建立新的員工帳號'}</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -237,14 +258,40 @@ export function EmployeeFormDialog({ open, onOpenChange, employee }: Props) {
             </div>
           </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
-            <Button type="submit" disabled={createEmployee.isPending || updateEmployee.isPending}>
-              {createEmployee.isPending || updateEmployee.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />處理中...</> : isEdit ? '儲存變更' : '建立員工'}
-            </Button>
+          <DialogFooter className={isEdit ? 'sm:justify-between' : undefined}>
+            {isEdit && (
+              <Button type="button" variant="destructive" onClick={openDeleteConfirm}>
+                <Trash2 className="mr-2 h-4 w-4" />刪除員工
+              </Button>
+            )}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+              <Button type="submit" disabled={createEmployee.isPending || updateEmployee.isPending}>
+                {createEmployee.isPending || updateEmployee.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />處理中...</> : isEdit ? '儲存變更' : '建立員工'}
+              </Button>
+            </div>
           </DialogFooter>
         </form>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>確定要刪除員工？</DialogTitle>
+            <DialogDescription>
+              將永久刪除 {employee ? `${employee.user.last_name}${employee.user.first_name}（${employee.employee_id}）` : '此員工'}，並一併移除登入帳號、排班、請假、契約及其他關聯歷史。此操作無法復原。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={cancelDelete} disabled={deleteEmployee.isPending}>返回編輯</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleteEmployee.isPending}>
+              {deleteEmployee.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              確認刪除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

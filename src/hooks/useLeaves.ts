@@ -2,14 +2,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { leavesApi } from '@/api/endpoints/leaves'
 import { parseApiErrorMessage } from '@/api/errors'
 import { toast } from '@/hooks/use-toast'
-import type { LeaveCreateRequest, LeaveListParams } from '@/types/leave'
+import type { LeaveCreateRequest, LeaveListParams, LeaveSettingsUpdate } from '@/types/leave'
 
 export const LEAVES_KEY = ['leaves'] as const
 export const LEAVE_BALANCE_KEY = ['leaveBalance'] as const
+export const LEAVE_BALANCES_KEY = ['leaveBalances'] as const
+export const LEAVE_SETTINGS_KEY = ['leaveSettings'] as const
 
 function invalidateLeaveSideEffects(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: LEAVES_KEY })
   queryClient.invalidateQueries({ queryKey: LEAVE_BALANCE_KEY })
+  queryClient.invalidateQueries({ queryKey: LEAVE_BALANCES_KEY })
   queryClient.invalidateQueries({ queryKey: ['schedules'] })
   queryClient.invalidateQueries({ queryKey: ['approvedScheduleTimeline'] })
 }
@@ -43,6 +46,39 @@ export function useLeaveBalance(employee?: number, enabled = true) {
     queryKey: [...LEAVE_BALANCE_KEY, employee ?? 'self'],
     queryFn: () => leavesApi.balance(employee),
     enabled,
+  })
+}
+
+export function useLeaveBalances(employee?: number, enabled = true) {
+  return useQuery({
+    queryKey: [...LEAVE_BALANCES_KEY, employee ?? 'self'],
+    queryFn: () => leavesApi.balances(employee),
+    enabled,
+  })
+}
+
+export function useLeaveSettings(enabled = true) {
+  return useQuery({
+    queryKey: LEAVE_SETTINGS_KEY,
+    queryFn: leavesApi.getSettings,
+    enabled,
+  })
+}
+
+export function useUpdateLeaveSettings() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (data: LeaveSettingsUpdate) => leavesApi.updateSettings(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: LEAVE_SETTINGS_KEY })
+      queryClient.invalidateQueries({ queryKey: LEAVE_BALANCES_KEY })
+      toast({ title: '請假設定已儲存', description: '假別額度將依新設定重新計算' })
+    },
+    onError: (error) => toast({
+      title: '儲存失敗',
+      description: parseApiErrorMessage(error, '無法更新請假設定'),
+      variant: 'destructive',
+    }),
   })
 }
 

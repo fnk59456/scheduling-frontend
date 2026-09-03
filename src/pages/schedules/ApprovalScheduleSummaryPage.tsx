@@ -30,7 +30,6 @@ import type {
   ApprovedTimelineConflict,
   Schedule,
   ScheduleOverlapDecisionType,
-  ScheduleVersionType,
 } from '@/types/schedule'
 import { approvedLeaveDateMap, approvedLeaveFor, isWorkingSchedule, workingSchedules } from '@/lib/leaveDates'
 
@@ -83,10 +82,8 @@ function intervalLabel(conflict: ApprovedTimelineConflict) {
 export default function ApprovalScheduleSummaryPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const initialTrack = searchParams.get('track')
   const [orgId, setOrgId] = useState(searchParams.get('organization') ?? '')
   const [branchId, setBranchId] = useState(searchParams.get('branch') ?? 'all')
-  const [track, setTrack] = useState<ScheduleVersionType>(initialTrack === 'legal' ? 'legal' : 'actual')
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
   const [activeConflict, setActiveConflict] = useState<ApprovedTimelineConflict | null>(null)
   const [decisionType, setDecisionType] = useState<ScheduleOverlapDecisionType>('select')
@@ -132,11 +129,11 @@ export default function ApprovalScheduleSummaryPage() {
   const leaveDateMap = useMemo(() => approvedLeaveDateMap(approvedLeaves), [approvedLeaves])
 
   const timelineQuery = useQuery({
-    queryKey: ['approvedScheduleTimeline', orgIdResolved, branchId, track, dateFrom, dateTo],
+    queryKey: ['approvedScheduleTimeline', orgIdResolved, branchId, dateFrom, dateTo],
     queryFn: () => scheduleVersionsApi.approvedTimeline({
       organization: orgIdResolved!,
       branch: branchId === 'all' ? 'all' : Number(branchId),
-      version_type: track,
+      version_type: 'actual',
       date_from: dateFrom,
       date_to: dateTo,
     }),
@@ -249,7 +246,7 @@ export default function ApprovalScheduleSummaryPage() {
 
       <Card>
         <CardHeader className="pb-3"><CardTitle className="text-base">篩選條件</CardTitle></CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3">
+        <CardContent className="grid gap-4 md:grid-cols-2">
           <div className="space-y-1.5">
             <Label>機構</Label>
             <Select value={orgId} onValueChange={setOrgId}>
@@ -264,16 +261,6 @@ export default function ApprovalScheduleSummaryPage() {
               <SelectContent>
                 <SelectItem value="all">全部</SelectItem>
                 {branches.map((item) => <SelectItem key={item.id} value={String(item.id)}>{item.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>班表軌道</Label>
-            <Select value={track} onValueChange={(value) => setTrack(value as ScheduleVersionType)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="actual">B 實際版</SelectItem>
-                <SelectItem value="legal">A 法規版</SelectItem>
               </SelectContent>
             </Select>
           </div>

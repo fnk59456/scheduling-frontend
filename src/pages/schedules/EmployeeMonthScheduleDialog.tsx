@@ -676,7 +676,7 @@ export function EmployeeMonthScheduleDialog({
         <p className="text-center text-xs text-muted-foreground">
           {displayMode === 'current'
             ? '目前版本模式只顯示所選版本；其他版本僅用於衝突警示。'
-            : '跨版本拼接模式會顯示並下載相同機構、相同 A/B 軌的所有非封存版本。'}
+            : '跨版本拼接模式會顯示並下載相同機構的所有非封存版本。'}
           未排班不代表已核准休假。
         </p>
       </DialogContent>

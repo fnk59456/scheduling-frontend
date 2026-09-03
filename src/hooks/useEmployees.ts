@@ -1,7 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { employeesApi, certificationsApi } from '@/api/endpoints/employees'
 import { parseApiErrorMessage } from '@/api/errors'
-import type { EmployeeCreateRequest, EmployeeUpdateRequest, ContractCreateRequest } from '@/types/employee'
+import type {
+  ContractCreateRequest,
+  EmployeeAvailabilityUpdateRequest,
+  EmployeeCreateRequest,
+  EmployeeTimeSlotCreateRequest,
+  EmployeeUpdateRequest,
+} from '@/types/employee'
 import { toast } from '@/hooks/use-toast'
 
 const EMPLOYEES_KEY = ['employees']
@@ -66,7 +72,70 @@ export function useDeleteEmployee() {
       qc.invalidateQueries({ queryKey: EMPLOYEES_KEY })
       toast({ title: '刪除成功', description: '員工已刪除' })
     },
-    onError: () => toast({ title: '刪除失敗', description: '無法刪除員工', variant: 'destructive' }),
+    onError: (err) => toast({
+      title: '刪除失敗',
+      description: parseApiErrorMessage(err, '無法刪除員工'),
+      variant: 'destructive',
+    }),
+  })
+}
+
+export function useEmployeeAvailability(employeeId: number) {
+  return useQuery({
+    queryKey: [...EMPLOYEES_KEY, employeeId, 'availability'],
+    queryFn: () => employeesApi.getAvailability(employeeId),
+    enabled: !!employeeId,
+  })
+}
+
+export function useUpdateEmployeeAvailability() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ employeeId, data }: { employeeId: number; data: EmployeeAvailabilityUpdateRequest }) =>
+      employeesApi.patchAvailability(employeeId, data),
+    onSuccess: (_, { employeeId }) => {
+      qc.invalidateQueries({ queryKey: [...EMPLOYEES_KEY, employeeId, 'availability'] })
+      toast({ title: '儲存成功', description: '可用性設定已更新' })
+    },
+    onError: (err) => toast({
+      title: '儲存失敗',
+      description: parseApiErrorMessage(err, '無法更新可用性設定'),
+      variant: 'destructive',
+    }),
+  })
+}
+
+export function useAddEmployeeTimeSlot() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ employeeId, data }: { employeeId: number; data: EmployeeTimeSlotCreateRequest }) =>
+      employeesApi.addTimeSlot(employeeId, data),
+    onSuccess: (_, { employeeId }) => {
+      qc.invalidateQueries({ queryKey: [...EMPLOYEES_KEY, employeeId, 'availability'] })
+      toast({ title: '新增成功', description: '時段已加入' })
+    },
+    onError: (err) => toast({
+      title: '新增失敗',
+      description: parseApiErrorMessage(err, '無法新增時段'),
+      variant: 'destructive',
+    }),
+  })
+}
+
+export function useRemoveEmployeeTimeSlot() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ employeeId, slotId }: { employeeId: number; slotId: number }) =>
+      employeesApi.removeTimeSlot(employeeId, slotId),
+    onSuccess: (_, { employeeId }) => {
+      qc.invalidateQueries({ queryKey: [...EMPLOYEES_KEY, employeeId, 'availability'] })
+      toast({ title: '移除成功', description: '時段已刪除' })
+    },
+    onError: (err) => toast({
+      title: '移除失敗',
+      description: parseApiErrorMessage(err, '無法刪除時段'),
+      variant: 'destructive',
+    }),
   })
 }
 

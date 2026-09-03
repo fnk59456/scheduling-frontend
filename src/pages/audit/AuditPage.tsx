@@ -16,7 +16,7 @@ interface AuditEntry {
 }
 
 const mockAudit: AuditEntry[] = [
-  { id: 1, who: '張俊宏（督導）',   action: '簽核排班版本', target: '2026/W17 法規版',          when: '2026-04-20 09:15', type: 'approve' },
+  { id: 1, who: '張俊宏（督導）',   action: '簽核排班版本', target: '2026/W17 排班版本',          when: '2026-04-20 09:15', type: 'approve' },
   { id: 2, who: '王小明（護理師）', action: '申請調班',     target: '4/22 晚班 → 陳志明',       when: '2026-04-20 08:42', type: 'request' },
   { id: 3, who: 'AI 排班引擎',      action: '產生排班草稿', target: '2026/W17（建議）',          when: '2026-04-19 22:01', type: 'ai' },
   { id: 4, who: '李大華（照服員）', action: '上班打卡',     target: '4/20 午班 · 遲到 14 分',    when: '2026-04-20 11:14', type: 'attendance' },

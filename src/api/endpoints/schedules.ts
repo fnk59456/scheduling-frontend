@@ -45,8 +45,8 @@ export const scheduleVersionsApi = {
   approve: (id: number) =>
     apiClient.post<ScheduleVersion>(`/schedules/versions/${id}/approve/`, {}).then((r) => r.data),
 
-  unapprove: (id: number, reason: string) =>
-    apiClient.post<ScheduleVersion>(`/schedules/versions/${id}/unapprove/`, { reason }).then((r) => r.data),
+  unapprove: (id: number, reason?: string) =>
+    apiClient.post<ScheduleVersion>(`/schedules/versions/${id}/unapprove/`, reason ? { reason } : {}).then((r) => r.data),
 
   approvedTimeline: (params: {
     organization: number

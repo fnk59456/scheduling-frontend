@@ -13,6 +13,8 @@ export type LeaveType =
   | 'other'
 
 export type LeaveStatus = 'pending' | 'approved' | 'rejected' | 'cancelled'
+export type LeaveSubmissionSource = 'self' | 'manager_proxy' | 'system'
+export type LeaveRequestUnit = 'full_day' | 'time_range'
 
 export interface AffectedScheduleSnapshot {
   id: number
@@ -29,10 +31,14 @@ export interface LeaveRequest {
   leave_type_display: string
   start_date: string
   end_date: string
+  request_unit: LeaveRequestUnit
+  start_time: string | null
+  end_time: string | null
   total_days: number
   reason: string
   status: LeaveStatus
   status_display: string
+  submission_source: LeaveSubmissionSource
   created_by: number | null
   created_by_name: string
   reviewed_by: number | null
@@ -64,6 +70,12 @@ export interface LeaveImpact {
   start_date: string
   end_date: string
   affected_count: number
+  overlap_minutes: number | null
+  daily_breakdown: Array<{
+    date: string
+    scheduled_minutes: number
+    leave_minutes: number
+  }>
   schedules: Schedule[]
 }
 
@@ -80,6 +92,46 @@ export interface AnnualLeaveBalance {
 
 export interface LeaveReviewRequest {
   note?: string
+}
+
+export interface LeaveBalanceItem {
+  leave_type: LeaveType
+  leave_type_display: string
+  entitled_minutes: number | null
+  used_minutes: number
+  pending_minutes: number
+  remaining_minutes: number | null
+}
+
+export interface LeaveBalancesResponse {
+  employee: number
+  as_of: string
+  day_minutes: number
+  entitlement_year_start: string | null
+  entitlement_year_end: string | null
+  balances: LeaveBalanceItem[]
+}
+
+export interface LeaveQuotaSetting {
+  leave_type: Exclude<LeaveType, 'annual'>
+  leave_type_display: string
+  annual_quota_minutes: number | null
+  is_default: boolean
+}
+
+export interface LeaveSettings {
+  organization: number
+  day_minutes: number
+  quotas: LeaveQuotaSetting[]
+}
+
+export interface LeaveSettingsUpdate {
+  day_minutes?: number
+  quotas?: Array<{
+    leave_type: Exclude<LeaveType, 'annual'>
+    annual_quota_minutes: number | null
+    is_active?: boolean
+  }>
 }
 
 export const LEAVE_TYPE_OPTIONS: ReadonlyArray<{ value: LeaveType; label: string }> = [

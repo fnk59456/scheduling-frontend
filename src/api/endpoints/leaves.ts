@@ -6,8 +6,11 @@ import type {
   LeaveCreateRequest,
   LeaveImpact,
   LeaveListParams,
+  LeaveBalancesResponse,
   LeaveRequest,
   LeaveReviewRequest,
+  LeaveSettings,
+  LeaveSettingsUpdate,
 } from '@/types/leave'
 
 export const leavesApi = {
@@ -51,4 +54,17 @@ export const leavesApi = {
         params: employee ? { employee } : undefined,
       })
       .then((response) => response.data),
+
+  balances: (employee?: number) =>
+    apiClient
+      .get<LeaveBalancesResponse>('/leaves/balances/', {
+        params: employee ? { employee } : undefined,
+      })
+      .then((response) => response.data),
+
+  getSettings: () =>
+    apiClient.get<LeaveSettings>('/leaves/settings/').then((response) => response.data),
+
+  updateSettings: (data: LeaveSettingsUpdate) =>
+    apiClient.put<LeaveSettings>('/leaves/settings/', data).then((response) => response.data),
 }

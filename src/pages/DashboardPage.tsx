@@ -48,7 +48,7 @@ export default function DashboardPage() {
       title: '在職員工',   value: employeeCount || 7,  delta: '+2',    icon: Users,         color: 'text-blue-600 bg-blue-100 dark:bg-blue-900/40 dark:text-blue-300',      desc: '本週到職 2 位',
     },
     {
-      title: '本週班次',   value: 42,                  delta: '已簽核', icon: CalendarCheck, color: 'text-green-600 bg-green-100 dark:bg-green-900/40 dark:text-green-300',   desc: '法規版 2026/W17',
+      title: '本週班次',   value: 42,                  delta: '已簽核', icon: CalendarCheck, color: 'text-green-600 bg-green-100 dark:bg-green-900/40 dark:text-green-300',   desc: '排班版本 2026/W17',
     },
     {
       title: '今日已打卡', value: '6/7',               delta: '86%',   icon: Clock,         color: 'text-orange-600 bg-orange-100 dark:bg-orange-900/40 dark:text-orange-300', desc: '1 人未打卡',

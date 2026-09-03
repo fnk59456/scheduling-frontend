@@ -33,8 +33,12 @@ export interface UserProfile {
   last_name: string
   phone: string
   role_name: string
-  organization_name: string
-  branch_name: string
+  organization: number | null
+  organization_name: string | null
+  branch: number | null
+  branch_name: string | null
+  employee_pk: number | null
+  employee_code: string | null
 }
 
 export interface LoginRequest {

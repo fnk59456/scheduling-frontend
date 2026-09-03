@@ -28,14 +28,14 @@ import {
   useApproveLeave,
   useCancelLeave,
   useCreateLeave,
-  useLeaveBalance,
+  useLeaveBalances,
   useLeaveImpact,
   useLeaveRequests,
   useRejectLeave,
 } from '@/hooks/useLeaves'
 import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/lib/utils'
-import type { LeaveListParams, LeaveRequest, LeaveStatus, LeaveType } from '@/types/leave'
+import type { LeaveBalanceItem, LeaveListParams, LeaveRequest, LeaveStatus, LeaveType } from '@/types/leave'
 import { LEAVE_TYPE_OPTIONS } from '@/types/leave'
 
 const statusStyles: Record<LeaveStatus, string> = {
@@ -54,6 +54,12 @@ function personLabel(employee: { user_name: string; employee_id: string }) {
   return employee.user_name || employee.employee_id
 }
 
+function formatHours(minutes: number | null) {
+  if (minutes === null) return '不限額'
+  const hours = minutes / 60
+  return `${Number(hours.toFixed(2))} 小時`
+}
+
 function dateRangeLabel(leave: Pick<LeaveRequest, 'start_date' | 'end_date' | 'total_days'>) {
   return leave.start_date === leave.end_date
     ? `${leave.start_date}（1 天）`
@@ -61,6 +67,7 @@ function dateRangeLabel(leave: Pick<LeaveRequest, 'start_date' | 'end_date' | 't
 }
 
 export default function LeavesPage() {
+  const user = useAuthStore((state) => state.user)
   const hasRole = useAuthStore((state) => state.hasRole)
   const isSupervisor = hasRole(['admin', 'manager', 'supervisor'])
   const [statusFilter, setStatusFilter] = useState<'all' | LeaveStatus>('all')
@@ -68,6 +75,7 @@ export default function LeavesPage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [showCreate, setShowCreate] = useState(false)
+  const [createMode, setCreateMode] = useState<'self' | 'proxy'>('self')
   const [selectedLeave, setSelectedLeave] = useState<LeaveRequest | null>(null)
 
   const params = useMemo<LeaveListParams>(() => ({
@@ -80,7 +88,13 @@ export default function LeavesPage() {
   const leaveQuery = useLeaveRequests(params, { allPages: true })
   const pendingQuery = useLeaveRequests({ status: 'pending' })
   const approvedQuery = useLeaveRequests({ status: 'approved' })
-  const ownBalanceQuery = useLeaveBalance(undefined, !isSupervisor)
+  const ownEmployeeId = user?.employee_pk ?? undefined
+  const managerNeedsEmployeeProfile = (
+    isSupervisor
+    && user?.role_name !== 'admin'
+    && !ownEmployeeId
+  )
+  const ownBalancesQuery = useLeaveBalances(ownEmployeeId, !!ownEmployeeId)
   const employeesQuery = useEmployees({ is_active: true }, { enabled: isSupervisor, allPages: true })
   const employees = isSupervisor ? employeesQuery.data?.results ?? [] : []
   const records = leaveQuery.data?.results ?? []
@@ -99,37 +113,51 @@ export default function LeavesPage() {
             <RefreshCw className={cn('mr-2 h-4 w-4', leaveQuery.isFetching && 'animate-spin')} />
             重新整理
           </Button>
-          <Button onClick={() => setShowCreate(true)} disabled={!isSupervisor}>
-            <Plus className="mr-2 h-4 w-4" />
-            {isSupervisor ? '代員工登記' : '申請請假'}
-          </Button>
+          {!!ownEmployeeId && (
+            <Button onClick={() => { setCreateMode('self'); setShowCreate(true) }}>
+              <Plus className="mr-2 h-4 w-4" />{isSupervisor ? '申請自己的假' : '申請請假'}
+            </Button>
+          )}
+          {isSupervisor && (
+            <Button variant={ownEmployeeId ? 'outline' : 'default'} onClick={() => { setCreateMode('proxy'); setShowCreate(true) }}>
+              <Plus className="mr-2 h-4 w-4" />代員工登記
+            </Button>
+          )}
         </div>
       </div>
 
-      {!isSupervisor && (
+      {!ownEmployeeId && !isSupervisor && (
         <div className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-sm dark:border-amber-800/50 dark:bg-amber-950/20">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
           <div>
-            <p className="font-medium text-amber-900 dark:text-amber-200">員工送件功能等待後端契約</p>
+            <p className="font-medium text-amber-900 dark:text-amber-200">尚未建立員工資料</p>
             <p className="mt-1 text-amber-800/80 dark:text-amber-300/80">
-              目前登入資訊尚未提供 Employee PK，因此暫時只能查看既有申請、特休餘額及取消待審申請。
+              此登入帳號沒有對應的 Employee PK，請聯絡主管完成員工資料設定後再申請請假。
             </p>
           </div>
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {managerNeedsEmployeeProfile && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/20 dark:text-amber-200">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          此主管帳號尚未連結員工資料，因此目前只能代員工登記；建立 Employee 關聯後即可申請自己的假。
+        </div>
+      )}
+
+      <div className="grid max-w-xl grid-cols-2 gap-3">
         <SummaryCard title={isSupervisor ? '待審核' : '我的待審'} value={pendingQuery.data?.count ?? 0} icon={Clock3} tone="text-amber-600" />
         <SummaryCard title="已核准" value={approvedQuery.data?.count ?? 0} icon={CheckCircle2} tone="text-emerald-600" />
-        {!isSupervisor && (
-          <SummaryCard
-            title="特休剩餘"
-            value={ownBalanceQuery.data ? `${ownBalanceQuery.data.remaining_days} 天` : '—'}
-            icon={CalendarOff}
-            tone="text-violet-600"
-          />
-        )}
       </div>
+
+      {!!ownEmployeeId && (
+        <LeaveBalancePanel
+          title="我的假別餘額"
+          balances={ownBalancesQuery.data?.balances}
+          loading={ownBalancesQuery.isLoading}
+          error={ownBalancesQuery.isError}
+        />
+      )}
 
       <Card>
         <CardContent className="p-5">
@@ -232,12 +260,20 @@ export default function LeavesPage() {
         </CardContent>
       </Card>
 
-      <CreateLeaveDialog open={showCreate} onOpenChange={setShowCreate} employees={employees} />
+      <CreateLeaveDialog
+        open={showCreate}
+        onOpenChange={setShowCreate}
+        mode={createMode}
+        ownEmployeeId={ownEmployeeId}
+        ownEmployeeLabel={`${user?.last_name ?? ''}${user?.first_name ?? ''}`.trim() || user?.employee_code || user?.username || '目前登入者'}
+        employees={employees}
+      />
       <LeaveDetailDialog
         leave={selectedLeave}
         open={!!selectedLeave}
         onOpenChange={(open) => !open && setSelectedLeave(null)}
         isSupervisor={isSupervisor}
+        ownEmployeeId={ownEmployeeId}
       />
     </div>
   )
@@ -250,21 +286,78 @@ function SummaryCard({ title, value, icon: Icon, tone }: {
   tone: string
 }) {
   return (
-    <Card>
-      <CardContent className="p-5">
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">{title}</span>
+    <Card className="shadow-none">
+      <CardContent className="p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <span className="text-xs text-muted-foreground">{title}</span>
+            <div className={cn('mt-0.5 text-xl font-bold leading-none', tone)}>{value}</div>
+          </div>
           <span className="rounded-full bg-muted p-1.5"><Icon className={cn('h-4 w-4', tone)} /></span>
         </div>
-        <div className={cn('mt-2 text-2xl font-bold', tone)}>{value}</div>
       </CardContent>
     </Card>
   )
 }
 
-function CreateLeaveDialog({ open, onOpenChange, employees }: {
+function LeaveBalancePanel({ title, balances, loading, error }: {
+  title: string
+  balances?: LeaveBalanceItem[]
+  loading: boolean
+  error: boolean
+}) {
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <CalendarOff className="h-5 w-5 text-violet-600" />
+          <h2 className="font-semibold">{title}</h2>
+          <span className="text-xs text-muted-foreground">單位：小時</span>
+        </div>
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />載入假別餘額
+          </div>
+        ) : error ? (
+          <div className="py-8 text-center text-sm text-destructive">無法載入假別餘額，請稍後重試。</div>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {(balances ?? []).map((balance) => (
+              <div key={balance.leave_type} className="rounded-lg border bg-muted/10 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium">{balance.leave_type_display}</span>
+                  <span className={cn(
+                    'text-xs font-semibold',
+                    balance.remaining_minutes !== null && balance.remaining_minutes < 0
+                      ? 'text-destructive'
+                      : 'text-violet-700 dark:text-violet-300',
+                  )}>
+                    {formatHours(balance.remaining_minutes)}
+                  </span>
+                </div>
+                <div className="mt-1.5 flex flex-wrap gap-x-2 text-[11px] text-muted-foreground">
+                  <span>額度 <b className="font-medium text-foreground">{formatHours(balance.entitled_minutes)}</b></span>
+                  <span>已用 <b className="font-medium text-foreground">{formatHours(balance.used_minutes)}</b></span>
+                  <span>待審 <b className="font-medium text-foreground">{formatHours(balance.pending_minutes)}</b></span>
+                </div>
+                {balance.remaining_minutes !== null && balance.remaining_minutes < 0 && (
+                  <p className="mt-2 text-xs text-destructive">已超出額度，後端仍允許送件。</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function CreateLeaveDialog({ open, onOpenChange, mode, ownEmployeeId, ownEmployeeLabel, employees }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  mode: 'self' | 'proxy'
+  ownEmployeeId?: number
+  ownEmployeeLabel: string
   employees: Array<{ id: number; employee_id: string; user_name: string }>
 }) {
   const [employee, setEmployee] = useState('')
@@ -273,10 +366,11 @@ function CreateLeaveDialog({ open, onOpenChange, employees }: {
   const [endDate, setEndDate] = useState(todayInput)
   const [reason, setReason] = useState('')
   const createLeave = useCreateLeave()
-  const employeeId = Number(employee)
+  const employeeId = mode === 'self' ? ownEmployeeId ?? 0 : Number(employee)
   const validRange = !!employeeId && !!startDate && !!endDate && startDate <= endDate
   const impactQuery = useLeaveImpact(validRange ? { employee: employeeId, start_date: startDate, end_date: endDate } : undefined)
-  const balanceQuery = useLeaveBalance(employeeId, !!employeeId && leaveType === 'annual')
+  const balanceQuery = useLeaveBalances(employeeId, !!employeeId)
+  const selectedBalance = balanceQuery.data?.balances.find((balance) => balance.leave_type === leaveType)
   const totalDays = startDate && endDate && startDate <= endDate
     ? Math.round((new Date(`${endDate}T00:00:00`).getTime() - new Date(`${startDate}T00:00:00`).getTime()) / 86_400_000) + 1
     : 0
@@ -293,8 +387,12 @@ function CreateLeaveDialog({ open, onOpenChange, employees }: {
     <Dialog open={open} onOpenChange={(next) => { onOpenChange(next); if (!next) reset() }}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>代員工登記請假</DialogTitle>
-          <DialogDescription>主管送出後會由後端立即核准，並同步更新受影響的班表。</DialogDescription>
+          <DialogTitle>{mode === 'self' ? '申請請假' : '代員工登記請假'}</DialogTitle>
+          <DialogDescription>
+            {mode === 'self'
+              ? '送出後進入待審核狀態，需由其他主管處理。'
+              : '主管替其他員工送出後會立即核准，並同步更新受影響的班表。'}
+          </DialogDescription>
         </DialogHeader>
         <form
           className="space-y-4"
@@ -312,19 +410,25 @@ function CreateLeaveDialog({ open, onOpenChange, employees }: {
             reset()
           }}
         >
-          <div className="space-y-1.5">
-            <Label>員工</Label>
-            <Select value={employee} onValueChange={setEmployee}>
-              <SelectTrigger><SelectValue placeholder="選擇員工" /></SelectTrigger>
-              <SelectContent>
-                {employees.map((item) => (
-                  <SelectItem key={item.id} value={String(item.id)}>
-                    {personLabel(item)}（{item.employee_id}）
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {mode === 'self' ? (
+            <div className="rounded-lg border bg-muted/20 px-3 py-2 text-sm">
+              申請人：<span className="font-medium">{ownEmployeeLabel}</span>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label>員工</Label>
+              <Select value={employee} onValueChange={setEmployee}>
+                <SelectTrigger><SelectValue placeholder="選擇員工" /></SelectTrigger>
+                <SelectContent>
+                  {employees.map((item) => (
+                    <SelectItem key={item.id} value={String(item.id)}>
+                      {personLabel(item)}（{item.employee_id}）
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
               <Label>假別</Label>
@@ -364,11 +468,11 @@ function CreateLeaveDialog({ open, onOpenChange, employees }: {
                 warning={(impactQuery.data?.affected_count ?? 0) > 0}
               />
               <InfoPanel
-                title="特休餘額"
-                loading={leaveType === 'annual' && balanceQuery.isFetching}
-                value={leaveType === 'annual' && balanceQuery.data ? `剩餘 ${balanceQuery.data.remaining_days} 天` : '非特休不扣額度'}
-                detail={leaveType === 'annual' && balanceQuery.data ? `額度 ${balanceQuery.data.entitled_days} 天，已用 ${balanceQuery.data.used_days} 天` : '餘額僅供審核參考'}
-                warning={leaveType === 'annual' && !!balanceQuery.data && totalDays > balanceQuery.data.remaining_days}
+                title={`${LEAVE_TYPE_OPTIONS.find((option) => option.value === leaveType)?.label ?? '假別'}餘額`}
+                loading={balanceQuery.isFetching}
+                value={selectedBalance ? `剩餘 ${formatHours(selectedBalance.remaining_minutes)}` : '查詢中'}
+                detail={selectedBalance ? `額度 ${formatHours(selectedBalance.entitled_minutes)}，已用 ${formatHours(selectedBalance.used_minutes)}，待審 ${formatHours(selectedBalance.pending_minutes)}` : '餘額僅供送件參考'}
+                warning={!!selectedBalance && selectedBalance.remaining_minutes !== null && selectedBalance.remaining_minutes < 0}
               />
             </div>
           )}
@@ -377,7 +481,7 @@ function CreateLeaveDialog({ open, onOpenChange, employees }: {
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
             <Button type="submit" disabled={!validRange || createLeave.isPending}>
               {createLeave.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              登記並立即核准
+              {mode === 'self' ? '送出申請' : '登記並立即核准'}
             </Button>
           </DialogFooter>
         </form>
@@ -386,11 +490,12 @@ function CreateLeaveDialog({ open, onOpenChange, employees }: {
   )
 }
 
-function LeaveDetailDialog({ leave, open, onOpenChange, isSupervisor }: {
+function LeaveDetailDialog({ leave, open, onOpenChange, isSupervisor, ownEmployeeId }: {
   leave: LeaveRequest | null
   open: boolean
   onOpenChange: (open: boolean) => void
   isSupervisor: boolean
+  ownEmployeeId?: number
 }) {
   const [note, setNote] = useState('')
   const approveLeave = useApproveLeave()
@@ -401,10 +506,15 @@ function LeaveDetailDialog({ leave, open, onOpenChange, isSupervisor }: {
     start_date: leave.start_date,
     end_date: leave.end_date,
   } : undefined)
-  const balanceQuery = useLeaveBalance(leave?.employee, !!leave && leave.leave_type === 'annual')
+  const balanceQuery = useLeaveBalances(leave?.employee, !!leave)
   const busy = approveLeave.isPending || rejectLeave.isPending || cancelLeave.isPending
 
   if (!leave) return null
+
+  const selectedBalance = balanceQuery.data?.balances.find(
+    (balance) => balance.leave_type === leave.leave_type,
+  )
+  const isOwnRequest = ownEmployeeId === leave.employee
 
   const close = () => {
     setNote('')
@@ -419,7 +529,9 @@ function LeaveDetailDialog({ leave, open, onOpenChange, isSupervisor }: {
             <DialogTitle>{leave.employee_name || leave.employee_code} · {leave.leave_type_display}</DialogTitle>
             <Badge variant="outline" className={statusStyles[leave.status]}>{leave.status_display}</Badge>
           </div>
-          <DialogDescription>{leave.employee_code} · {dateRangeLabel(leave)}</DialogDescription>
+          <DialogDescription>
+            {leave.employee_code} · {dateRangeLabel(leave)} · {leave.submission_source === 'manager_proxy' ? '主管代登記' : '本人申請'}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -432,10 +544,11 @@ function LeaveDetailDialog({ leave, open, onOpenChange, isSupervisor }: {
               warning={(impactQuery.data?.affected_count ?? 0) > 0}
             />
             <InfoPanel
-              title="特休餘額"
-              loading={leave.leave_type === 'annual' && balanceQuery.isFetching}
-              value={leave.leave_type === 'annual' && balanceQuery.data ? `剩餘 ${balanceQuery.data.remaining_days} 天` : '不適用'}
-              detail={leave.leave_type === 'annual' && balanceQuery.data ? `額度 ${balanceQuery.data.entitled_days} 天，已用 ${balanceQuery.data.used_days} 天` : '此假別不扣特休'}
+              title={`${leave.leave_type_display}餘額`}
+              loading={balanceQuery.isFetching}
+              value={selectedBalance ? `剩餘 ${formatHours(selectedBalance.remaining_minutes)}` : '—'}
+              detail={selectedBalance ? `額度 ${formatHours(selectedBalance.entitled_minutes)}，已用 ${formatHours(selectedBalance.used_minutes)}，待審 ${formatHours(selectedBalance.pending_minutes)}` : '目前沒有餘額資料'}
+              warning={!!selectedBalance && selectedBalance.remaining_minutes !== null && selectedBalance.remaining_minutes < 0}
             />
           </div>
 
@@ -466,7 +579,14 @@ function LeaveDetailDialog({ leave, open, onOpenChange, isSupervisor }: {
             </div>
           )}
 
-          {isSupervisor && leave.status === 'pending' && (
+          {isSupervisor && leave.status === 'pending' && isOwnRequest && (
+            <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-sm text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/20 dark:text-amber-200">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              這是你自己的請假申請，需由其他主管審核。
+            </div>
+          )}
+
+          {isSupervisor && leave.status === 'pending' && !isOwnRequest && (
             <div className="space-y-1.5">
               <Label>審核備註／駁回理由</Label>
               <textarea
@@ -494,7 +614,7 @@ function LeaveDetailDialog({ leave, open, onOpenChange, isSupervisor }: {
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={close}>關閉</Button>
-            {isSupervisor && leave.status === 'pending' && (
+            {isSupervisor && leave.status === 'pending' && !isOwnRequest && (
               <>
                 <Button
                   variant="outline"

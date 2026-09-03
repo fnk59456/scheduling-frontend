@@ -28,8 +28,6 @@ import {
   useUpdateSchedule,
   useDeleteSchedule,
   useCheckCompliance,
-  useDeriveLegal,
-  useUpdateScheduleVersion,
 } from '@/hooks/useSchedules'
 import type {
   Schedule,
@@ -39,7 +37,6 @@ import type {
   ScheduleVersionCreateRequest,
   ComplianceViolation,
   CheckComplianceResult,
-  DeriveLegalResult,
   ScheduleCompareResult,
 } from '@/types/schedule'
 import { toast } from '@/hooks/use-toast'
@@ -247,7 +244,11 @@ export default function SchedulesPage() {
 
   const { data: employeesData, isLoading: employeesLoading } = useEmployees({
     is_active: true,
+    organization: orgIdResolved ?? undefined,
     branch: branchId === 'all' ? undefined : Number(branchId),
+  }, {
+    enabled: !!orgIdResolved,
+    allPages: true,
   })
   const employees = employeesData?.results ?? []
 
@@ -265,9 +266,11 @@ export default function SchedulesPage() {
     return rule ? numericRuleValue(rule.value, 8) : 8
   }, [shiftRulesData])
 
-  // 查所有版本（不依版本類型篩選）
+  // 合規 AI 排班尚未上線；前端暫時只呈現一般建立的排班版本。
+  // version_type 仍保留為後端相容欄位，不在 UI 暴露雙軌概念。
   const { data: versionsData, isLoading: versionsLoading, refetch: refetchVersions } = useScheduleVersions({
     organization: orgIdResolved ?? undefined,
+    version_type: 'actual',
   })
   const versions = versionsData?.results ?? []
   const visibleVersions = useMemo(
@@ -455,8 +458,6 @@ export default function SchedulesPage() {
   const updateSchedule = useUpdateSchedule()
   const deleteSchedule = useDeleteSchedule()
   const checkCompliance = useCheckCompliance()
-  const deriveLegal = useDeriveLegal()
-  const updateVersion = useUpdateScheduleVersion()
 
   // ===== 拖曳狀態 =====
   type DragSource = {
@@ -501,7 +502,6 @@ export default function SchedulesPage() {
   // ===== 工作流狀態 =====
   const [phase, setPhase] = useState<WorkflowPhase>('editing')
   const [complianceResult, setComplianceResult] = useState<CheckComplianceResult | null>(null)
-  const [deriveLegalResult, setDeriveLegalResult] = useState<DeriveLegalResult | null>(null)
 
   const hardViolations = complianceResult?.violations.filter((v) => v.severity === 'hard') ?? []
   const softViolations = complianceResult?.violations.filter((v) => v.severity === 'soft') ?? []
@@ -518,7 +518,6 @@ export default function SchedulesPage() {
   const resetWorkflow = () => {
     setPhase('editing')
     setComplianceResult(null)
-    setDeriveLegalResult(null)
   }
 
   useEffect(() => {
@@ -535,12 +534,7 @@ export default function SchedulesPage() {
 
       const hards = result.violations.filter((v) => v.severity === 'hard')
       if (hards.length === 0) {
-        // 合規 → 標為 A（legal）
-        await updateVersion.mutateAsync({
-          id: selectedVersion.id,
-          data: { version_type: 'legal' },
-        })
-        toast({ title: '合規通過', description: `班表已標記為法規版 (A)。軟性提醒 ${result.violations.length} 筆。` })
+        toast({ title: '合規通過', description: `合規檢查完成。軟性提醒 ${result.violations.length} 筆。` })
         setPhase('done')
       } else {
         setPhase('violations')
@@ -548,36 +542,6 @@ export default function SchedulesPage() {
     } catch {
       setPhase('editing')
     }
-  }
-
-  // ===== 派生 A =====
-  const handleDeriveLegal = async () => {
-    if (!selectedVersion) return
-    try {
-      const result = await deriveLegal.mutateAsync({ bVersionId: selectedVersion.id })
-      setDeriveLegalResult(result)
-      toast({
-        title: '法規版已產生',
-        description: `新版本 #${result.legal_version_id}，${result.diff_summary.cells_removed_from_b} 格移除、${result.diff_summary.cells_added_in_a} 格新增`,
-      })
-      setPhase('done')
-      // 切換到新 A 版本
-      await refetchVersions()
-      setVersionId(String(result.legal_version_id))
-    } catch {
-      // Error handled by the mutation
-    }
-  }
-
-  // ===== 維持 B =====
-  const handleKeepAsB = async () => {
-    if (!selectedVersion) return
-    await updateVersion.mutateAsync({
-      id: selectedVersion.id,
-      data: { version_type: 'actual' },
-    })
-    toast({ title: '已標記為 B 班表', description: '此版本維持為實際版 (B)' })
-    setPhase('done')
   }
 
   // ===== 拖曳 Drop 處理 =====
@@ -616,10 +580,6 @@ export default function SchedulesPage() {
         employee: targetEmployeeId,
         schedule_date: targetDate,
       })
-      if (selectedVersion.version_type === 'legal') {
-        await scheduleVersionsApi.update(selectedVersion.id, { version_type: 'actual' })
-        await refetchVersions()
-      }
       if (crossVersionOverlaps.length > 0) {
         const details = crossVersionOverlaps.slice(0, 3).map((schedule) => {
           const version = timelineVersions.find((item) => item.id === schedule.schedule_version)
@@ -947,7 +907,7 @@ export default function SchedulesPage() {
         }),
       ])
 
-      const versionLabel = `${selectedVersion.version_label}（${selectedVersion.version_type === 'legal' ? 'A 法規版' : 'B 實際版'}）`
+      const versionLabel = selectedVersion.version_label
       const { createScheduleWorkbook } = await import('@/lib/scheduleExcelExport')
       const buffer = await createScheduleWorkbook({
         schedules: scheduleResponse.results,
@@ -990,21 +950,13 @@ export default function SchedulesPage() {
     || employeesLoading
     || versionsLoading
 
-  const versionBadgeLabel = selectedVersion
-    ? selectedVersion.version_type === 'legal'
-      ? 'A 法規版'
-      : 'B 實際版'
-    : null
-
-  const versionBadgeVariant = selectedVersion?.version_type === 'legal' ? 'default' : 'secondary'
-
   return (
     <div className="space-y-6">
       {/* ===== 頁面標題 ===== */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">排班管理</h1>
-          <p className="text-muted-foreground mt-1">建立班表 → 合規檢查 → 標記 A / B 班表</p>
+          <p className="text-muted-foreground mt-1">建立、檢查與簽核排班版本</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => { refetchVersions(); refetchSchedules(); resetWorkflow() }} disabled={isBusy}>
@@ -1093,7 +1045,7 @@ export default function SchedulesPage() {
                 ) : (
                   versionsInActiveGroup.map((v) => (
                     <SelectItem key={v.id} value={String(v.id)}>
-                      {v.version_label}（{v.version_type === 'legal' ? 'A' : 'B'}｜{v.status_display}）
+                      {v.version_label}（{v.status_display}）
                     </SelectItem>
                   ))
                 )}
@@ -1157,7 +1109,6 @@ export default function SchedulesPage() {
                 const params = new URLSearchParams()
                 if (orgIdResolved) params.set('organization', String(orgIdResolved))
                 if (branchId !== 'all') params.set('branch', branchId)
-                params.set('track', selectedVersion?.version_type ?? 'actual')
                 navigate(`/schedules/approved?${params.toString()}`)
               }}
             >
@@ -1175,8 +1126,8 @@ export default function SchedulesPage() {
             </Button>
 
             {selectedVersion && (
-              <Badge variant={versionBadgeVariant} className="ml-auto">
-                {versionBadgeLabel}｜{selectedVersion.status_display}
+              <Badge variant="secondary" className="ml-auto">
+                {selectedVersion.status_display}
               </Badge>
             )}
           </div>
@@ -1189,27 +1140,10 @@ export default function SchedulesPage() {
           <CardContent className="py-4 flex items-center gap-3">
             <ShieldCheck className="h-5 w-5 text-emerald-600" />
             <div>
-              <p className="font-medium text-emerald-800">合規通過 — 已標記為 A 班表（法規版）</p>
+              <p className="font-medium text-emerald-800">合規通過</p>
               {softViolations.length > 0 && (
                 <p className="text-sm text-emerald-700 mt-0.5">{softViolations.length} 筆軟性提醒（不影響合規判定）</p>
               )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {phase === 'done' && deriveLegalResult && (
-        <Card className="border-emerald-200 bg-emerald-50/50">
-          <CardContent className="py-4 flex items-center gap-3">
-            <ShieldCheck className="h-5 w-5 text-emerald-600" />
-            <div>
-              <p className="font-medium text-emerald-800">
-                法規版 (A) 已產生 — 版本 #{deriveLegalResult.legal_version_id}
-              </p>
-              <p className="text-sm text-emerald-700 mt-0.5">
-                {deriveLegalResult.diff_summary.cells_unchanged} 格不變、{deriveLegalResult.diff_summary.cells_removed_from_b} 格移除、{deriveLegalResult.diff_summary.cells_added_in_a} 格新增
-                {deriveLegalResult.billing ? ` · 扣除 ${deriveLegalResult.billing.tokens_charged} token` : ''}
-              </p>
             </div>
           </CardContent>
         </Card>
@@ -1266,16 +1200,8 @@ export default function SchedulesPage() {
               )}
             </div>
             {/* 底部操作按鈕 */}
-            <div className="flex items-center gap-3 pt-2 border-t">
-              <Button onClick={handleDeriveLegal} disabled={deriveLegal.isPending}>
-                {deriveLegal.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <ArrowRight className="h-4 w-4 mr-2" />}
-                系統修正為法規版 (A)
-              </Button>
-              <Button variant="outline" onClick={handleKeepAsB} disabled={updateVersion.isPending}>
-                {updateVersion.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                維持現版 (B)
-              </Button>
-              <Button variant="ghost" size="sm" onClick={resetWorkflow} className="ml-auto">
+            <div className="flex items-center justify-end pt-2 border-t">
+              <Button variant="outline" size="sm" onClick={resetWorkflow}>
                 返回編輯
               </Button>
             </div>
@@ -1316,32 +1242,11 @@ export default function SchedulesPage() {
                     <th className="text-left p-3 w-56">員工</th>
                     {weekDays.map((d, idx) => {
                       const date = fmtDate(d)
-                      const resolution = versionResolutionByDate.get(date)
-                      const ownerVersion = resolution?.version
-                      const previousOwner = idx > 0
-                        ? versionResolutionByDate.get(fmtDate(weekDays[idx - 1]))?.version
-                        : null
-                      const isVersionBoundary = idx > 0 && ownerVersion?.id !== previousOwner?.id
-                      const hasConflict = (resolution?.conflicts.length ?? 0) > 1
                       return (
-                      <th
-                        key={idx}
-                        className={cn(
-                          'min-w-32 p-3 text-left',
-                          !ownerVersion && 'bg-muted/50 text-muted-foreground',
-                          isVersionBoundary && 'border-l-2 border-l-primary/50',
-                          hasConflict && 'bg-destructive/5',
-                        )}
-                      >
+                      <th key={idx} className="min-w-32 p-3 text-left">
                         <div className="flex items-center justify-between">
                           <span className="font-semibold">週{weekdayLabels[idx]}</span>
                           <span className="text-xs text-muted-foreground">{date.slice(5)}</span>
-                        </div>
-                        <div className={cn(
-                          'mt-1 truncate text-[10px] font-normal',
-                          ownerVersion ? 'text-primary/75' : 'text-muted-foreground/70',
-                        )}>
-                          {hasConflict ? '版本衝突' : ownerVersion?.version_label ?? '尚無版本'}
                         </div>
                       </th>
                     )})}
@@ -1564,11 +1469,11 @@ export default function SchedulesPage() {
           <DialogHeader>
             <DialogTitle>取消簽核</DialogTitle>
             <DialogDescription>
-              取消後版本會回到草稿並可再次編輯。請填寫原因，系統會保留稽核紀錄。
+              取消後版本會回到草稿並可再次編輯；若填寫原因，系統會一併保留在稽核紀錄。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="unapprove-reason">取消原因（必填）</Label>
+            <Label htmlFor="unapprove-reason">取消原因（選填）</Label>
             <Input
               id="unapprove-reason"
               value={unapproveReason}
@@ -1584,10 +1489,10 @@ export default function SchedulesPage() {
             <Button
               type="button"
               variant="destructive"
-              disabled={!unapproveReason.trim() || unapproveVersion.isPending}
+              disabled={unapproveVersion.isPending}
               onClick={async () => {
-                if (!selectedVersion || !unapproveReason.trim()) return
-                await unapproveVersion.mutateAsync({ id: selectedVersion.id, reason: unapproveReason.trim() })
+                if (!selectedVersion) return
+                await unapproveVersion.mutateAsync({ id: selectedVersion.id, reason: unapproveReason.trim() || undefined })
                 setShowUnapproveDialog(false)
                 setUnapproveReason('')
               }}
@@ -1641,7 +1546,7 @@ export default function SchedulesPage() {
           onOpenChange={setMonthScheduleOpen}
           employee={monthScheduleEmployee}
           versionId={selectedVersion.id}
-          versionLabel={`${selectedVersion.version_label}（${selectedVersion.version_type === 'legal' ? 'A 法規版' : 'B 實際版'}）`}
+          versionLabel={selectedVersion.version_label}
           initialMonth={weekDays[3]}
           origin={monthDialogOrigin}
           templates={templates}
@@ -1656,7 +1561,7 @@ export default function SchedulesPage() {
           <DialogHeader>
             <DialogTitle>新增排班版本</DialogTitle>
             <DialogDescription>
-              建立新排班版本（預設為實際版 B）。版本不限制起訖日期，系統會依實際班次自動維護資料涵蓋範圍。
+              建立新的排班版本。版本不限制起訖日期，系統會依實際班次自動維護資料涵蓋範圍。
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={submitCreateVersion} className="space-y-4">
@@ -1711,7 +1616,7 @@ export default function SchedulesPage() {
           <DialogHeader>
             <DialogTitle>{editingSchedule ? '編輯排班' : '新增排班'}</DialogTitle>
             <DialogDescription>
-              {selectedVersion ? `版本：${selectedVersion.version_label}（${selectedVersion.version_type === 'legal' ? 'A 法規版' : 'B 實際版'}）` : ''}
+              {selectedVersion ? `版本：${selectedVersion.version_label}` : ''}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={submitSchedule} className="space-y-4">
@@ -1828,7 +1733,7 @@ export default function SchedulesPage() {
                     .filter((v) => !selectedVersion || v.id !== selectedVersion.id)
                     .map((v) => (
                       <SelectItem key={v.id} value={String(v.id)}>
-                        {v.version_label}（{v.version_type === 'legal' ? 'A' : 'B'}｜{v.status_display}）
+                        {v.version_label}（{v.status_display}）
                       </SelectItem>
                     ))}
                 </SelectContent>
@@ -1847,7 +1752,6 @@ export default function SchedulesPage() {
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">版本 1</p>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     <p className="font-semibold">{compareResult.version1.version_label}</p>
-                    <Badge variant="outline">{compareResult.version1.version_type === 'legal' ? 'A 法規版' : 'B 實際版'}</Badge>
                     <Badge variant="secondary">{compareResult.version1.status_display}</Badge>
                   </div>
                 </div>
@@ -1856,7 +1760,6 @@ export default function SchedulesPage() {
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">版本 2</p>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     <p className="font-semibold">{compareResult.version2.version_label}</p>
-                    <Badge variant="outline">{compareResult.version2.version_type === 'legal' ? 'A 法規版' : 'B 實際版'}</Badge>
                     <Badge variant="secondary">{compareResult.version2.status_display}</Badge>
                   </div>
                 </div>
@@ -1924,7 +1827,7 @@ export default function SchedulesPage() {
           <DialogHeader>
             <DialogTitle>匯出整合班表</DialogTitle>
             <DialogDescription>
-              匯出 {selectedVersion?.version_label}（{selectedVersion?.version_type === 'legal' ? 'A 法規版' : 'B 實際版'}）指定期間的整合 Excel 班表。預設為目前瀏覽月份，仍可自行調整。
+              匯出 {selectedVersion?.version_label} 指定期間的整合 Excel 班表。預設為目前瀏覽月份，仍可自行調整。
             </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-3">
