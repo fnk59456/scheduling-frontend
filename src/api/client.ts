@@ -3,10 +3,6 @@ import { auth } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 import { queryClient } from '@/api/queryClient'
 
-type AuthMode = 'firebase' | 'token'
-
-const AUTH_MODE = (import.meta.env.VITE_AUTH_MODE as AuthMode | undefined) || 'firebase'
-
 function setAuthHeader(config: any, value: string) {
   // Axios v1 may use AxiosHeaders which exposes .set()
   if (config.headers && typeof config.headers.set === 'function') {
@@ -22,48 +18,52 @@ const apiClient = axios.create({
 })
 
 apiClient.interceptors.request.use(async (config) => {
-  if (AUTH_MODE === 'token') {
-    const token = useAuthStore.getState().devApiToken
-    if (token) setAuthHeader(config, `Token ${token}`)
+  const state = useAuthStore.getState()
+
+  if (state.authMethod === 'firebase' && auth?.currentUser) {
+    setAuthHeader(config, `Bearer ${await auth.currentUser.getIdToken()}`)
     return config
   }
 
-  // firebase mode
-  if (!auth) return config
-  const user = auth.currentUser
-  if (user) setAuthHeader(config, `Bearer ${await user.getIdToken()}`)
+  if (state.devApiToken) {
+    setAuthHeader(config, `Token ${state.devApiToken}`)
+    return config
+  }
+
+  // Firebase redirect 返回後，store 可能尚未恢復；currentUser 仍可作為可靠來源。
+  if (auth?.currentUser) {
+    setAuthHeader(config, `Bearer ${await auth.currentUser.getIdToken()}`)
+  }
   return config
 })
 
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (AUTH_MODE === 'token') {
-      // 只有在「確實帶了 Token」的請求被 401 時才清掉 token
-      // 避免在登入前或初始化時（未附 Authorization）遇到 401 就把 token 清空，造成死循環
-      if (error.response?.status === 401) {
-        const reqAuth =
-          (typeof error.config?.headers?.get === 'function'
-            ? error.config.headers.get('Authorization')
-            : error.config?.headers?.Authorization) as string | undefined
+    if (error.response?.status !== 401) return Promise.reject(error)
 
-        if (reqAuth?.startsWith('Token ')) {
-          queryClient.clear()
-          useAuthStore.getState().setDevApiToken(null)
-        }
-      }
-      return Promise.reject(error)
-    }
+    const reqAuth =
+      (typeof error.config?.headers?.get === 'function'
+        ? error.config.headers.get('Authorization')
+        : error.config?.headers?.Authorization) as string | undefined
 
-    if (!auth) return Promise.reject(error)
-    if (error.response?.status === 401) {
-      const user = auth.currentUser
-      if (user) {
-        const newToken = await user.getIdToken(true)
+    if (reqAuth?.startsWith('Bearer ') && auth?.currentUser && !error.config?._firebaseRetried) {
+      try {
+        error.config._firebaseRetried = true
+        const newToken = await auth.currentUser.getIdToken(true)
         setAuthHeader(error.config, `Bearer ${newToken}`)
         return apiClient.request(error.config)
+      } catch {
+        queryClient.clear()
+        useAuthStore.getState().logout()
       }
     }
+
+    if (reqAuth?.startsWith('Token ')) {
+      queryClient.clear()
+      useAuthStore.getState().logout()
+    }
+
     return Promise.reject(error)
   }
 )

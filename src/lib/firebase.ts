@@ -1,9 +1,6 @@
 import { initializeApp, type FirebaseApp } from 'firebase/app'
 import { getAuth, type Auth } from 'firebase/auth'
 
-type AuthMode = 'firebase' | 'token'
-const AUTH_MODE = (import.meta.env.VITE_AUTH_MODE as AuthMode | undefined) || 'firebase'
-
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
@@ -13,11 +10,19 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
 }
 
-// 在本地 token 模式下，不初始化 Firebase（避免未设定 key 时直接崩溃）
+// Google 登入與帳密 Token 可以並存；只有設定完整時才初始化 Firebase，
+// 因此本地純 Token 開發不需要準備 Firebase 環境變數。
+export const isFirebaseConfigured = Boolean(
+  firebaseConfig.apiKey
+  && firebaseConfig.authDomain
+  && firebaseConfig.projectId
+  && firebaseConfig.appId,
+)
+
 let app: FirebaseApp | null = null
 let auth: Auth | null = null
 
-if (AUTH_MODE === 'firebase') {
+if (isFirebaseConfigured) {
   app = initializeApp(firebaseConfig)
   auth = getAuth(app)
 }

@@ -1,6 +1,12 @@
 import { useEffect, useCallback } from 'react'
-import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth'
-import { auth } from '@/lib/firebase'
+import {
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  signInWithPopup,
+  signInWithRedirect,
+  signOut,
+} from 'firebase/auth'
+import { auth, isFirebaseConfigured } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 import { authApi } from '@/api/endpoints/auth'
 import { queryClient } from '@/api/queryClient'
@@ -8,77 +14,90 @@ import { toast } from '@/hooks/use-toast'
 import { isAxiosError } from 'axios'
 import { parseApiErrorMessage } from '@/api/errors'
 
-type AuthMode = 'firebase' | 'token'
-const AUTH_MODE = (import.meta.env.VITE_AUTH_MODE as AuthMode | undefined) || 'firebase'
-
 export function useAuth() {
-  const { user, isAuthenticated, isLoading, devApiToken, setUser, setLoading, setDevApiToken, logout: storeLogout } = useAuthStore()
+  const {
+    user,
+    isAuthenticated,
+    isLoading,
+    devApiToken,
+    setUser,
+    setLoading,
+    setDevApiToken,
+    setAuthMethod,
+    logout: storeLogout,
+  } = useAuthStore()
 
   useEffect(() => {
-    if (AUTH_MODE === 'token') {
-      ;(async () => {
-        const token = devApiToken
-        if (!token) {
+    let disposed = false
+
+    const loadTokenProfile = async () => {
+      if (!devApiToken) {
+        if (!disposed) {
+          setAuthMethod(null)
           setUser(null)
           setLoading(false)
-          return
         }
-        try {
-          const profile = await authApi.getMe()
-          setUser(profile)
-        } catch {
-          // token 失效或後端拒絕：清理狀態，讓 ProtectedRoute 正常導回登入頁
-          setDevApiToken(null)
-          setUser(null)
-        } finally {
-          setLoading(false)
-        }
-      })()
-      return
-    }
-
-    if (!auth) {
-      setUser(null)
-      setLoading(false)
-      return
-    }
-
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) {
-        setUser(null)
-        setLoading(false)
         return
       }
       try {
+        setAuthMethod('token')
         const profile = await authApi.getMe()
-        setUser(profile)
+        if (!disposed) setUser(profile)
       } catch {
-        setUser(null)
+        if (!disposed) {
+          setDevApiToken(null)
+          setAuthMethod(null)
+          setUser(null)
+        }
       } finally {
-        setLoading(false)
+        if (!disposed) setLoading(false)
       }
-    })
-    return () => unsubscribe()
-  }, [devApiToken, setDevApiToken, setUser, setLoading])
+    }
 
-  const login = useCallback(async (email: string, password: string) => {
-    try {
-      setLoading(true)
-      if (AUTH_MODE === 'token') {
-        const res = await authApi.login({ username: email, password })
-        queryClient.clear()
-        setDevApiToken(res.token)
-        setUser(res.user)
-        toast({ title: '登入成功', description: `歡迎回來，${res.user.first_name || res.user.username}` })
+    if (!auth) {
+      void loadTokenProfile()
+      return () => { disposed = true }
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        try {
+          setAuthMethod('firebase')
+          if (devApiToken) setDevApiToken(null)
+          const profile = await authApi.getMe()
+          if (!disposed) setUser(profile)
+        } catch {
+          if (!disposed) {
+            setAuthMethod(null)
+            setUser(null)
+          }
+        } finally {
+          if (!disposed) setLoading(false)
+        }
         return
       }
 
-      if (!auth) throw new Error('Firebase 未初始化（請檢查 VITE_AUTH_MODE / Firebase env）')
-      await signInWithEmailAndPassword(auth, email, password)
-      const profile = await authApi.getMe()
+      await loadTokenProfile()
+    })
+    return () => {
+      disposed = true
+      unsubscribe()
+    }
+  }, [devApiToken, setAuthMethod, setDevApiToken, setUser, setLoading])
+
+  const login = useCallback(async (username: string, password: string) => {
+    try {
+      setLoading(true)
+      if (auth?.currentUser) await signOut(auth)
       queryClient.clear()
-      setUser(profile)
-      toast({ title: '登入成功', description: `歡迎回來，${profile.first_name || profile.username}` })
+      setDevApiToken(null)
+      setAuthMethod(null)
+
+      const res = await authApi.login({ username, password })
+      setDevApiToken(res.token)
+      setAuthMethod('token')
+      setUser(res.user)
+      toast({ title: '登入成功', description: `歡迎回來，${res.user.first_name || res.user.username}` })
     } catch (error: unknown) {
       const message = isAxiosError(error)
         ? error.response
@@ -92,24 +111,56 @@ export function useAuth() {
     } finally {
       setLoading(false)
     }
-  }, [setDevApiToken, setUser, setLoading])
+  }, [setAuthMethod, setDevApiToken, setUser, setLoading])
+
+  const loginWithGoogle = useCallback(async () => {
+    if (!auth || !isFirebaseConfigured) {
+      const error = new Error('Google 登入尚未設定，請聯絡系統管理員')
+      toast({ title: '無法使用 Google 登入', description: error.message, variant: 'destructive' })
+      throw error
+    }
+
+    try {
+      setLoading(true)
+      queryClient.clear()
+      setDevApiToken(null)
+      setAuthMethod('firebase')
+
+      const provider = new GoogleAuthProvider()
+      provider.setCustomParameters({ prompt: 'select_account' })
+      await signInWithPopup(auth, provider)
+
+      const profile = await authApi.getMe()
+      setUser(profile)
+      toast({ title: 'Google 登入成功', description: `歡迎，${profile.first_name || profile.username}` })
+      return profile
+    } catch (error: unknown) {
+      const code = typeof error === 'object' && error && 'code' in error
+        ? String((error as { code?: unknown }).code)
+        : ''
+
+      if (code === 'auth/popup-blocked') {
+        await signInWithRedirect(auth, new GoogleAuthProvider())
+        return null
+      }
+
+      const message = code === 'auth/popup-closed-by-user'
+        ? '已取消 Google 登入'
+        : isAxiosError(error)
+          ? parseApiErrorMessage(error, 'Google 帳號無法登入系統')
+          : error instanceof Error
+            ? error.message
+            : 'Google 登入失敗'
+      toast({ title: 'Google 登入失敗', description: message, variant: 'destructive' })
+      throw error
+    } finally {
+      setLoading(false)
+    }
+  }, [setAuthMethod, setDevApiToken, setUser, setLoading])
 
   const logout = useCallback(async () => {
     try {
-      if (AUTH_MODE === 'token') {
-        queryClient.clear()
-        setDevApiToken(null)
-        storeLogout()
-        toast({ title: '已登出', description: '您已安全登出系統' })
-        return
-      }
-
-      if (!auth) {
-        queryClient.clear()
-        storeLogout()
-        return
-      }
-      await signOut(auth)
+      if (auth?.currentUser) await signOut(auth)
       queryClient.clear()
       storeLogout()
       toast({ title: '已登出', description: '您已安全登出系統' })
@@ -117,7 +168,15 @@ export function useAuth() {
       const message = error instanceof Error ? error.message : '登出時發生錯誤'
       toast({ title: '登出失敗', description: message, variant: 'destructive' })
     }
-  }, [setDevApiToken, storeLogout])
+  }, [storeLogout])
 
-  return { user, isAuthenticated, isLoading, login, logout }
+  return {
+    user,
+    isAuthenticated,
+    isLoading,
+    login,
+    loginWithGoogle,
+    logout,
+    googleLoginAvailable: isFirebaseConfigured,
+  }
 }

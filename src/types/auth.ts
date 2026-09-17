@@ -39,6 +39,7 @@ export interface UserProfile {
   branch_name: string | null
   employee_pk: number | null
   employee_code: string | null
+  firebase_linked: boolean
 }
 
 export interface LoginRequest {
