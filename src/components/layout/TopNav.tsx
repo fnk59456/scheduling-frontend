@@ -1,8 +1,7 @@
 import { useState } from 'react'
-import { Bell, Moon, Sun, Menu, Search, User, LogOut, X } from 'lucide-react'
+import { Bell, Moon, Sun, Menu, User, LogOut, X } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   DropdownMenu,
@@ -56,17 +55,6 @@ export function TopNav() {
               <div className="text-[10px] text-muted-foreground leading-tight">Scheduling System · MVP</div>
             </div>
           </a>
-        </div>
-
-        <div className="flex-1 mx-4 max-w-md hidden md:flex">
-          <div className="relative w-full">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              type="search"
-              placeholder="搜尋員工、班別、排班..."
-              className="w-full pl-9 bg-muted/50 border-muted focus-visible:bg-background hover:bg-muted/80 transition-colors"
-            />
-          </div>
         </div>
 
         <div className="flex items-center gap-3">
