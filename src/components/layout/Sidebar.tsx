@@ -8,10 +8,8 @@ import {
   Clock,
   CalendarX2,
   Timer,
-  ShieldCheck,
   Settings,
   Sparkles,
-  Brain,
   FileText,
 } from 'lucide-react'
 import type { RoleName } from '@/types/auth'
@@ -79,25 +77,12 @@ const navigationSections: { title: string; items: NavItem[] }[] = [
         description: '加班時數與費用試算',
       },
       {
-        name: '合規檢查',
-        href: '/compliance',
-        icon: ShieldCheck,
-        color: 'bg-teal-100 text-teal-600 dark:bg-teal-900/40 dark:text-teal-300',
-        description: '勞基法合規驗證',
-      },
-      {
-        name: 'AI 法規助手',
-        href: '/ai',
-        icon: Brain,
-        color: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300',
-        description: '勞基法智慧問答',
-      },
-      {
         name: '操作日誌',
         href: '/audit',
         icon: FileText,
         color: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
         description: '稽核與操作歷史',
+        roles: ['admin', 'manager'],
       },
     ],
   },
