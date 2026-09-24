@@ -471,6 +471,9 @@ export default function SchedulesPage() {
   const llmGenerate = useLLMGenerateSchedule()
   const [showRenameDialog, setShowRenameDialog] = useState(false)
   const [renameValue, setRenameValue] = useState('')
+  const [showLLMScheduleDialog, setShowLLMScheduleDialog] = useState(false)
+  const [llmPeriodStart, setLlmPeriodStart] = useState('')
+  const [llmPeriodEnd, setLlmPeriodEnd] = useState('')
   const [llmResult, setLlmResult] = useState<LLMScheduleResult | null>(null)
 
   // ===== 拖曳狀態 =====
@@ -529,15 +532,42 @@ export default function SchedulesPage() {
     return map
   }, [complianceResult])
 
-  const runLLMSchedule = async () => {
+  const llmRangeDays = llmPeriodStart && llmPeriodEnd
+    ? Math.round((parseDate(llmPeriodEnd).getTime() - parseDate(llmPeriodStart).getTime()) / 86400000) + 1
+    : 0
+  const llmRangeError = !llmPeriodStart || !llmPeriodEnd
+    ? '請選擇開始與結束日期'
+    : llmRangeDays < 1
+      ? '結束日期不可早於開始日期'
+      : llmRangeDays > 62
+        ? '單次 AI 排班最多 62 天'
+        : null
+
+  const setLLMPeriod = (start: Date, end: Date) => {
+    setLlmPeriodStart(fmtDate(start))
+    setLlmPeriodEnd(fmtDate(end))
+  }
+
+  const openLLMScheduleDialog = () => {
     if (!selectedVersion) return
+    setLlmPeriodStart(dateFrom)
+    setLlmPeriodEnd(dateTo)
+    setShowLLMScheduleDialog(true)
+  }
+
+  const runLLMSchedule = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!selectedVersion) return
+    if (llmRangeError) return
     try {
       const result = await llmGenerate.mutateAsync({
         schedule_version: selectedVersion.id,
-        period_start: dateFrom,
-        period_end: dateTo,
+        period_start: llmPeriodStart,
+        period_end: llmPeriodEnd,
         consume_token: true,
       })
+      setShowLLMScheduleDialog(false)
+      setWeekStart(startOfWeek(parseDate(llmPeriodStart)))
       setLlmResult(result)
       await refetchSchedules()
     } catch {
@@ -1122,7 +1152,7 @@ export default function SchedulesPage() {
             </Button>
             <Button
               size="sm"
-              onClick={runLLMSchedule}
+              onClick={openLLMScheduleDialog}
               disabled={!canEditSelectedVersion || llmGenerate.isPending}
               title={selectedVersion && !canEditSelectedVersion ? '只有草稿版本可以執行 AI 排班' : undefined}
             >
@@ -1552,6 +1582,109 @@ export default function SchedulesPage() {
               <Button type="submit" disabled={updateVersion.isPending || !renameValue.trim()}>
                 {updateVersion.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 儲存名稱
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showLLMScheduleDialog}
+        onOpenChange={(open) => !llmGenerate.isPending && setShowLLMScheduleDialog(open)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>AI 排班區間</DialogTitle>
+            <DialogDescription>
+              選擇「{selectedVersion?.version_label ?? ''}」這次要產生班表的日期範圍。
+            </DialogDescription>
+          </DialogHeader>
+          <form className="space-y-5" onSubmit={runLLMSchedule}>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={llmPeriodStart === dateFrom && llmPeriodEnd === dateTo ? 'default' : 'outline'}
+                onClick={() => setLLMPeriod(weekStart, addDays(weekStart, 6))}
+              >
+                目前顯示週
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={
+                  llmPeriodStart === fmtDate(addDays(weekStart, 7))
+                    && llmPeriodEnd === fmtDate(addDays(weekStart, 13))
+                    ? 'default'
+                    : 'outline'
+                }
+                onClick={() => setLLMPeriod(addDays(weekStart, 7), addDays(weekStart, 13))}
+              >
+                下一週
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={
+                  llmPeriodStart === fmtDate(startOfMonth(weekStart))
+                    && llmPeriodEnd === fmtDate(endOfMonth(weekStart))
+                    ? 'default'
+                    : 'outline'
+                }
+                onClick={() => setLLMPeriod(startOfMonth(weekStart), endOfMonth(weekStart))}
+              >
+                顯示月份
+              </Button>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="llm-period-start">開始日期</Label>
+                <Input
+                  id="llm-period-start"
+                  type="date"
+                  value={llmPeriodStart}
+                  max={llmPeriodEnd || undefined}
+                  onChange={(event) => setLlmPeriodStart(event.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="llm-period-end">結束日期</Label>
+                <Input
+                  id="llm-period-end"
+                  type="date"
+                  value={llmPeriodEnd}
+                  min={llmPeriodStart || undefined}
+                  onChange={(event) => setLlmPeriodEnd(event.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className={cn(
+              'rounded-lg border px-4 py-3 text-sm',
+              llmRangeError
+                ? 'border-destructive/30 bg-destructive/5 text-destructive'
+                : 'bg-muted/40 text-muted-foreground',
+            )}>
+              {llmRangeError ?? `共 ${llmRangeDays} 天`}
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowLLMScheduleDialog(false)}
+                disabled={llmGenerate.isPending}
+              >
+                取消
+              </Button>
+              <Button type="submit" disabled={!!llmRangeError || llmGenerate.isPending}>
+                {llmGenerate.isPending
+                  ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  : <Sparkles className="mr-2 h-4 w-4" />}
+                {llmGenerate.isPending ? 'AI 排班中…' : '開始 AI 排班'}
               </Button>
             </DialogFooter>
           </form>
