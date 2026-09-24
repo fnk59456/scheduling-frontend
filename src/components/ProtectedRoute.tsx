@@ -8,7 +8,7 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, requiredRoles }: ProtectedRouteProps) {
-  const { isAuthenticated, isLoading, hasRole } = useAuthStore()
+  const { user, isAuthenticated, isLoading, hasRole } = useAuthStore()
   const location = useLocation()
 
   if (isLoading) {
@@ -24,6 +24,15 @@ export function ProtectedRoute({ children, requiredRoles }: ProtectedRouteProps)
 
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />
+  }
+
+  const needsOrganization = user?.role_name === 'manager' && user.organization === null
+  const isOnboarding = location.pathname === '/onboarding/organization'
+  if (needsOrganization && !isOnboarding) {
+    return <Navigate to="/onboarding/organization" replace />
+  }
+  if (!needsOrganization && isOnboarding) {
+    return <Navigate to="/dashboard" replace />
   }
 
   if (requiredRoles && !hasRole(requiredRoles)) {

@@ -5,7 +5,7 @@ import {
   ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, Settings2,
   CheckCircle, Clock, ShieldCheck, ShieldAlert, ArrowRight, AlertTriangle,
   CalendarDays, Download, FileCheck2, GitCompareArrows, MinusCircle,
-  PencilLine, PlusCircle,
+  PencilLine, PlusCircle, Sparkles,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -28,6 +28,8 @@ import {
   useUpdateSchedule,
   useDeleteSchedule,
   useCheckCompliance,
+  useUpdateScheduleVersion,
+  useLLMGenerateSchedule,
 } from '@/hooks/useSchedules'
 import type {
   Schedule,
@@ -54,6 +56,8 @@ import { WeekDatePicker } from './WeekDatePicker'
 import type { EmployeeListItem } from '@/types/employee'
 import type { LeaveRequest } from '@/types/leave'
 import { approvedLeaveDateMap, approvedLeaveFor, workingSchedules } from '@/lib/leaveDates'
+import { useComplianceSettings } from '@/hooks/useCompliance'
+import type { LLMScheduleResult } from '@/types/ai'
 
 function fmtDate(d: Date) {
   const yyyy = d.getFullYear()
@@ -289,6 +293,11 @@ export default function SchedulesPage() {
 
   const selectedVersion = visibleVersions.find((v) => String(v.id) === versionId) ?? null
   const canEditSelectedVersion = selectedVersion?.status === 'draft'
+  const complianceSettingsQuery = useComplianceSettings(!!selectedVersion)
+  const weeklyClosedDays = useMemo(
+    () => new Set(complianceSettingsQuery.data?.weekly_closed_days ?? []),
+    [complianceSettingsQuery.data?.weekly_closed_days],
+  )
 
   const [weekStart, setWeekStart] = useState<Date>(() => startOfWeek(new Date()))
   const [versionNavigationDate, setVersionNavigationDate] = useState<string | null>(null)
@@ -458,6 +467,11 @@ export default function SchedulesPage() {
   const updateSchedule = useUpdateSchedule()
   const deleteSchedule = useDeleteSchedule()
   const checkCompliance = useCheckCompliance()
+  const updateVersion = useUpdateScheduleVersion()
+  const llmGenerate = useLLMGenerateSchedule()
+  const [showRenameDialog, setShowRenameDialog] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const [llmResult, setLlmResult] = useState<LLMScheduleResult | null>(null)
 
   // ===== 拖曳狀態 =====
   type DragSource = {
@@ -508,12 +522,44 @@ export default function SchedulesPage() {
 
   const violationMap = useMemo(() => {
     const map = new Map<string, ComplianceViolation>()
-    if (phase !== 'violations' || !complianceResult) return map
+    if (!complianceResult) return map
     for (const v of complianceResult.violations) {
       map.set(violationCellKey(v), v)
     }
     return map
-  }, [phase, complianceResult])
+  }, [complianceResult])
+
+  const runLLMSchedule = async () => {
+    if (!selectedVersion) return
+    try {
+      const result = await llmGenerate.mutateAsync({
+        schedule_version: selectedVersion.id,
+        period_start: dateFrom,
+        period_end: dateTo,
+        consume_token: true,
+      })
+      setLlmResult(result)
+      await refetchSchedules()
+    } catch {
+      // Error toast is handled by the mutation.
+    }
+  }
+
+  const openRenameVersion = () => {
+    if (!selectedVersion) return
+    setRenameValue(selectedVersion.version_label)
+    setShowRenameDialog(true)
+  }
+
+  const submitRenameVersion = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!selectedVersion || !renameValue.trim()) return
+    await updateVersion.mutateAsync({
+      id: selectedVersion.id,
+      data: { version_label: renameValue.trim() },
+    })
+    setShowRenameDialog(false)
+  }
 
   const resetWorkflow = () => {
     setPhase('editing')
@@ -1062,8 +1108,9 @@ export default function SchedulesPage() {
           </div>
         </CardContent>
         <CardContent className="pt-0">
-          <div className="flex flex-wrap items-center gap-2">
-            {/* 合規檢查按鈕 */}
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* 合規檢查按鈕 */}
             <Button
               variant="outline"
               size="sm"
@@ -1072,6 +1119,17 @@ export default function SchedulesPage() {
             >
               {checkCompliance.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <ShieldCheck className="h-4 w-4 mr-2" />}
               合規檢查
+            </Button>
+            <Button
+              size="sm"
+              onClick={runLLMSchedule}
+              disabled={!canEditSelectedVersion || llmGenerate.isPending}
+              title={selectedVersion && !canEditSelectedVersion ? '只有草稿版本可以執行 AI 排班' : undefined}
+            >
+              {llmGenerate.isPending
+                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                : <Sparkles className="mr-2 h-4 w-4" />}
+              {llmGenerate.isPending ? 'AI 排班中…' : 'AI 排班'}
             </Button>
             {/* 簽核／取消簽核共用同一按鈕位置 */}
             <Button
@@ -1124,12 +1182,22 @@ export default function SchedulesPage() {
               <Download className="h-4 w-4 mr-2" />
               匯出整合班表
             </Button>
+            </div>
 
-            {selectedVersion && (
-              <Badge variant="secondary" className="ml-auto">
-                {selectedVersion.status_display}
-              </Badge>
-            )}
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              {selectedVersion && (
+                <Badge variant="secondary">{selectedVersion.status_display}</Badge>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground"
+                onClick={openRenameVersion}
+                disabled={!selectedVersion || updateVersion.isPending}
+              >
+                <PencilLine className="mr-2 h-4 w-4" />版本改名
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -1242,12 +1310,14 @@ export default function SchedulesPage() {
                     <th className="text-left p-3 w-56">員工</th>
                     {weekDays.map((d, idx) => {
                       const date = fmtDate(d)
+                      const isClosedDay = weeklyClosedDays.has((d.getDay() + 6) % 7)
                       return (
-                      <th key={idx} className="min-w-32 p-3 text-left">
+                      <th key={idx} className={cn('min-w-32 p-3 text-left', isClosedDay && 'bg-slate-100/80 dark:bg-slate-900/50')}>
                         <div className="flex items-center justify-between">
                           <span className="font-semibold">週{weekdayLabels[idx]}</span>
                           <span className="text-xs text-muted-foreground">{date.slice(5)}</span>
                         </div>
+                        {isClosedDay && <span className="mt-1 block text-[10px] font-medium text-slate-500">機構公休日</span>}
                       </th>
                     )})}
                   </tr>
@@ -1277,6 +1347,7 @@ export default function SchedulesPage() {
                       </td>
                       {weekDays.map((d, dayIndex) => {
                         const date = fmtDate(d)
+                        const isClosedDay = weeklyClosedDays.has((d.getDay() + 6) % 7)
                         const key = `${e.id}:${date}`
                         const cellSchedules = scheduleByEmployeeDate.get(key) ?? []
                         const cellLeaves = approvedLeaveFor(leaveDateMap, e.id, date)
@@ -1301,6 +1372,7 @@ export default function SchedulesPage() {
                               ownerVersion && !isSelectedOwner && 'bg-blue-50/20',
                               isVersionBoundary && 'border-l-2 border-l-primary/50',
                               hasConflict && 'bg-destructive/5',
+                              isClosedDay && 'bg-slate-100/70 dark:bg-slate-900/40',
                               isDragTarget && 'bg-primary/10 outline outline-2 outline-primary/40 rounded-md',
                             )}
                             onDragOver={(ev) => { ev.preventDefault(); setDragOver({ employeeId: e.id, date }) }}
@@ -1463,6 +1535,64 @@ export default function SchedulesPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={showRenameDialog} onOpenChange={setShowRenameDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>重新命名排班版本</DialogTitle>
+            <DialogDescription>只更新顯示名稱，不會修改班次內容或簽核狀態。</DialogDescription>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={submitRenameVersion}>
+            <div className="space-y-1.5">
+              <Label htmlFor="rename-version">版本名稱</Label>
+              <Input id="rename-version" value={renameValue} onChange={(event) => setRenameValue(event.target.value)} autoFocus required />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setShowRenameDialog(false)}>取消</Button>
+              <Button type="submit" disabled={updateVersion.isPending || !renameValue.trim()}>
+                {updateVersion.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                儲存名稱
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={llmResult !== null} onOpenChange={(open) => !open && setLlmResult(null)}>
+        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>AI 排班結果</DialogTitle>
+            <DialogDescription>
+              已新增 {llmResult?.created_count ?? 0} 筆班次，模型 {llmResult?.model ?? ''}。
+            </DialogDescription>
+          </DialogHeader>
+          {(llmResult?.warnings.length ?? 0) > 0 && (
+            <section className="space-y-2">
+              <h3 className="font-medium text-amber-700">人力缺口提醒</h3>
+              <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-sm text-amber-900">
+                {llmResult?.warnings.map((warning, index) => <p key={`${warning}-${index}`}>{warning}</p>)}
+              </div>
+            </section>
+          )}
+          {(llmResult?.rejected.length ?? 0) > 0 && (
+            <section className="space-y-2">
+              <h3 className="font-medium text-muted-foreground">略過 {llmResult?.rejected_count} 筆不合格輸出</h3>
+              <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg border p-3 text-sm">
+                {llmResult?.rejected.map((item, index) => (
+                  <div key={index} className="rounded bg-muted/50 p-2">
+                    <p className="font-medium">{item.reason}</p>
+                    <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{JSON.stringify(item.row)}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+          {(llmResult?.warnings.length ?? 0) === 0 && (llmResult?.rejected.length ?? 0) === 0 && (
+            <p className="rounded-lg bg-emerald-50 p-4 text-sm text-emerald-800">所有回傳班次均已通過驗證。</p>
+          )}
+          <DialogFooter><Button onClick={() => setLlmResult(null)}>完成</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showUnapproveDialog} onOpenChange={setShowUnapproveDialog}>
         <DialogContent>

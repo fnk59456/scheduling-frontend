@@ -8,6 +8,8 @@ import type {
   AIScheduleAsyncResult,
   AIComplianceReport,
   AIChangeImpact,
+  LLMScheduleRequest,
+  LLMScheduleResult,
 } from '@/types/ai'
 
 /**
@@ -19,6 +21,12 @@ import type {
  * - /ai/schedule/generate/ 會自動從 DB 載入員工 availability，前端不需再手動傳入
  */
 export const aiApi = {
+  /** 免費 LLM 直接產生並寫入指定草稿版本。 */
+  llmGenerate: (data: LLMScheduleRequest) =>
+    apiClient
+      .post<LLMScheduleResult>('/ai/schedule/llm-generate/', data)
+      .then((r) => r.data),
+
   /**
    * 產生排班表。
    * - run_async=false (預設)：同步，回傳 AIScheduleResult

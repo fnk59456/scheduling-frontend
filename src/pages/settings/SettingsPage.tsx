@@ -1,11 +1,12 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
-import { Award, Building2, CalendarDays, ShieldCheck, ListOrdered, CalendarOff } from 'lucide-react'
+import { Award, Building2, CalendarDays, ShieldCheck, ListOrdered, CalendarOff, Landmark } from 'lucide-react'
 
 const settingsTabs = [
   { name: '班別模板',     href: '/settings/shifts',        icon: CalendarDays },
   { name: '員工優先順序', href: '/settings/priorities',    icon: ListOrdered },
   { name: '排班規則',     href: '/settings/rules',         icon: ShieldCheck },
+  { name: '公休與假日',   href: '/settings/compliance',    icon: Landmark },
   { name: '機構與分店',   href: '/settings/organizations', icon: Building2 },
   { name: '證照設定',     href: '/settings/certifications', icon: Award },
   { name: '請假設定',     href: '/settings/leaves',        icon: CalendarOff },

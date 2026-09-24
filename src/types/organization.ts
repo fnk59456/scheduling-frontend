@@ -27,7 +27,7 @@ export interface Branch {
 
 export interface OrganizationCreateRequest {
   name: string
-  code: string
+  code?: string
   address?: string
   phone?: string
   email?: string

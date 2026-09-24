@@ -138,3 +138,36 @@ export interface AIChangeImpact {
   warnings: AIScheduleViolation[]
   affected_employees: number[]
 }
+
+// ----- LLM schedule generation -----
+
+export interface LLMScheduleRequest {
+  schedule_version: number
+  period_start?: string
+  period_end?: string
+  consume_token?: boolean
+}
+
+export interface LLMRejectedAssignment {
+  row: Record<string, unknown>
+  reason: string
+}
+
+export interface LLMScheduleResult {
+  created_count: number
+  rejected_count: number
+  assignments: Array<{
+    id: number
+    employee_id: number
+    date: string
+    shift_id: number
+  }>
+  rejected: LLMRejectedAssignment[]
+  warnings: string[]
+  model: string
+  engine: 'llm'
+  billing: null | {
+    billing_mode: 'generate'
+    tokens_charged: number
+  }
+}

@@ -1,148 +1,182 @@
-import { useState } from 'react'
-import { RefreshCw, ShieldCheck, AlertTriangle, AlertCircle, Info, Sparkles, Brain } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { AlertCircle, AlertTriangle, Brain, CheckCircle2, RefreshCw, ShieldCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useCheckCompliance, useScheduleVersions } from '@/hooks/useSchedules'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import type { CheckComplianceResult, ComplianceSeverity } from '@/types/schedule'
 
-type Severity = 'high' | 'medium' | 'low'
-
-interface Violation {
-  id: number
-  severity: Severity
-  employee: string
-  date: string
-  type: string
-  message: string
-  law: string
-  suggestion: string
-}
-
-const mockViolations: Violation[] = [
-  {
-    id: 1, severity: 'high', employee: '林美玲', date: '2026-04-24',
-    type: '超時工時',
-    message: '本週累計 48.5 小時 · 超過法定 40 小時上限',
-    law: '勞基法 §32-I',
-    suggestion: '將週五午班改派給陳志明（本週 34 小時，仍有餘額）',
-  },
-  {
-    id: 2, severity: 'high', employee: '李大華', date: '2026-04-22',
-    type: '休息不足',
-    message: '晚班結束至隔日早班僅 8 小時，低於 11 小時最低間隔',
-    law: '勞基法 §34',
-    suggestion: '將隔日早班延後至 10:00 或改派他人',
-  },
-  {
-    id: 3, severity: 'medium', employee: '吳宗翰', date: '2026-04-23',
-    type: '連續出勤',
-    message: '已連續工作 7 天，建議強制休息',
-    law: '勞基法 §36',
-    suggestion: '於本週安排 1 天例假',
-  },
-  {
-    id: 4, severity: 'low', employee: '陳志明', date: '2026-04-25',
-    type: '夜班未輪替',
-    message: '連續 4 週排大夜班，建議輪替',
-    law: '職安署建議',
-    suggestion: '下週改排午班，由張俊宏頂替大夜',
-  },
-]
-
-const severityConfig: Record<Severity, { label: string; icon: React.ElementType; badgeClass: string; iconClass: string; bgClass: string }> = {
-  high:   { label: '嚴重', icon: AlertTriangle, badgeClass: 'bg-destructive/10 text-destructive border-destructive/20', iconClass: 'bg-destructive/10 text-destructive', bgClass: 'border-l-4 border-l-destructive' },
-  medium: { label: '中度', icon: AlertCircle,  badgeClass: 'bg-amber-50 text-amber-700 border-amber-200',               iconClass: 'bg-amber-50 text-amber-600',          bgClass: '' },
-  low:    { label: '輕度', icon: Info,          badgeClass: 'bg-muted text-muted-foreground border-border',              iconClass: 'bg-muted text-muted-foreground',       bgClass: '' },
-}
+type Filter = 'all' | ComplianceSeverity
 
 export default function CompliancePage() {
   const navigate = useNavigate()
-  const [filter, setFilter] = useState<'all' | Severity>('all')
+  const versionsQuery = useScheduleVersions()
+  const checkCompliance = useCheckCompliance()
+  const versions = versionsQuery.data?.results ?? []
+  const [versionId, setVersionId] = useState<number | null>(null)
+  const [filter, setFilter] = useState<Filter>('all')
+  const [result, setResult] = useState<CheckComplianceResult | null>(null)
 
-  const filtered = filter === 'all' ? mockViolations : mockViolations.filter((v) => v.severity === filter)
-  const highCount = mockViolations.filter((v) => v.severity === 'high').length
-  const medCount = mockViolations.filter((v) => v.severity === 'medium').length
-  const lowCount = mockViolations.filter((v) => v.severity === 'low').length
+  useEffect(() => {
+    if (versionId === null && versions.length > 0) setVersionId(versions[0].id)
+  }, [versionId, versions])
+
+  useEffect(() => {
+    setResult(null)
+  }, [versionId])
+
+  const hardCount = result?.violations.filter((item) => item.severity === 'hard').length ?? 0
+  const softCount = result?.violations.filter((item) => item.severity === 'soft').length ?? 0
+  const filtered = useMemo(() => {
+    if (!result) return []
+    return filter === 'all'
+      ? result.violations
+      : result.violations.filter((item) => item.severity === filter)
+  }, [filter, result])
+
+  const runCheck = async () => {
+    if (!versionId) return
+    try {
+      const nextResult = await checkCompliance.mutateAsync({ versionId })
+      setResult(nextResult)
+      const nextHardCount = nextResult.violations.filter((item) => item.severity === 'hard').length
+      toast({
+        title: nextHardCount === 0 ? '合規檢查完成' : '檢查完成',
+        description: `發現 ${nextResult.total_count} 筆結果，其中 ${nextHardCount} 筆為硬性違規`,
+      })
+    } catch {
+      // Mutation hook already shows the API error.
+    }
+  }
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">合規檢查</h1>
-          <p className="text-muted-foreground mt-1">即時掃描本週排班，依勞基法條文分級標示違規</p>
+          <p className="mt-1 text-muted-foreground">以後端現行規則即時檢查指定排班版本</p>
         </div>
-        <Button onClick={() => toast({ title: '重新掃描完成', description: `共發現 ${mockViolations.length} 筆違規` })}>
-          <RefreshCw className="h-4 w-4 mr-2" />重新掃描
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <select
+            className="h-10 min-w-64 rounded-md border border-input bg-background px-3 text-sm"
+            value={versionId ?? ''}
+            onChange={(event) => setVersionId(Number(event.target.value))}
+            disabled={versionsQuery.isLoading || versions.length === 0}
+          >
+            {versions.length === 0 && <option value="">尚無排班版本</option>}
+            {versions.map((version) => (
+              <option key={version.id} value={version.id}>
+                {version.version_label}｜{version.period_start}～{version.period_end}
+              </option>
+            ))}
+          </select>
+          <Button onClick={runCheck} disabled={!versionId || checkCompliance.isPending}>
+            <RefreshCw className={cn('mr-2 h-4 w-4', checkCompliance.isPending && 'animate-spin')} />
+            {checkCompliance.isPending ? '檢查中' : '開始檢查'}
+          </Button>
+        </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        {[
-          { t: '整體合規率', v: '92%',  d: '較上週 +4pp',   c: 'text-emerald-600', icon: ShieldCheck, bg: 'bg-emerald-100' },
-          { t: '嚴重違規',  v: highCount, d: '需立即處理',   c: 'text-destructive', icon: AlertTriangle, bg: 'bg-red-100' },
-          { t: '中度違規',  v: medCount,  d: '建議本週改善', c: 'text-amber-600',   icon: AlertCircle,   bg: 'bg-amber-100' },
-          { t: '輕度違規',  v: lowCount,  d: '可待下期調整', c: 'text-muted-foreground', icon: Info, bg: 'bg-muted' },
-        ].map((s) => (
-          <Card key={s.t}>
-            <CardContent className="p-5">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">{s.t}</span>
-                <span className={cn('rounded-full p-1.5', s.bg, s.c)}><s.icon className="h-4 w-4" /></span>
-              </div>
-              <div className={cn('text-2xl font-bold mt-2', s.c)}>{s.v}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">{s.d}</div>
-            </CardContent>
-          </Card>
-        ))}
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">檢查狀態</span>
+              <ShieldCheck className="h-5 w-5 text-emerald-600" />
+            </div>
+            <div className={cn('mt-2 text-2xl font-bold', result && hardCount === 0 ? 'text-emerald-600' : '')}>
+              {!result ? '尚未檢查' : hardCount === 0 ? '硬性規則通過' : '需要處理'}
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">結果依組織合規設定判定</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">硬性違規</span>
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+            </div>
+            <div className="mt-2 text-2xl font-bold text-destructive">{hardCount}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">簽核前必須處理</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">軟性提醒</span>
+              <AlertCircle className="h-5 w-5 text-amber-600" />
+            </div>
+            <div className="mt-2 text-2xl font-bold text-amber-600">{softCount}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">可依現場情況評估</div>
+          </CardContent>
+        </Card>
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
-        <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Tabs value={filter} onValueChange={(value) => setFilter(value as Filter)}>
           <TabsList>
-            <TabsTrigger value="all">全部 {mockViolations.length}</TabsTrigger>
-            <TabsTrigger value="high">嚴重</TabsTrigger>
-            <TabsTrigger value="medium">中度</TabsTrigger>
-            <TabsTrigger value="low">輕度</TabsTrigger>
+            <TabsTrigger value="all">全部 {result?.total_count ?? 0}</TabsTrigger>
+            <TabsTrigger value="hard">硬性 {hardCount}</TabsTrigger>
+            <TabsTrigger value="soft">軟性 {softCount}</TabsTrigger>
           </TabsList>
         </Tabs>
         <Button variant="ghost" size="sm" className="ml-auto" onClick={() => navigate('/ai')}>
-          <Brain className="h-4 w-4 mr-2" />詢問法規助手
+          <Brain className="mr-2 h-4 w-4" />詢問法規助手
         </Button>
       </div>
 
+      {!result && (
+        <Card>
+          <CardContent className="flex min-h-48 flex-col items-center justify-center gap-2 text-center text-muted-foreground">
+            <ShieldCheck className="h-10 w-10 opacity-40" />
+            <p>選擇排班版本後開始檢查，即可查看真實合規結果。</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {result && filtered.length === 0 && (
+        <Card>
+          <CardContent className="flex min-h-40 flex-col items-center justify-center gap-2 text-center text-emerald-700">
+            <CheckCircle2 className="h-10 w-10" />
+            <p className="font-medium">此分類沒有發現違規</p>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="space-y-3">
-        {filtered.map((v) => {
-          const cfg = severityConfig[v.severity]
-          const SevIcon = cfg.icon
+        {filtered.map((violation, index) => {
+          const isHard = violation.severity === 'hard'
+          const detail = Object.entries(violation.detail ?? {})
+            .map(([key, value]) => `${key}: ${String(value)}`)
+            .join(' · ')
           return (
-            <Card key={v.id} className={cn('card-hover', cfg.bgClass)}>
+            <Card key={`${violation.rule}-${violation.employee_pk}-${violation.schedule_date}-${index}`} className={cn(isHard && 'border-l-4 border-l-destructive')}>
               <CardContent className="p-5">
                 <div className="flex items-start gap-4">
-                  <div className={cn('h-10 w-10 rounded-lg flex items-center justify-center shrink-0', cfg.iconClass)}>
-                    <SevIcon className="h-5 w-5" />
+                  <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', isHard ? 'bg-destructive/10 text-destructive' : 'bg-amber-50 text-amber-600')}>
+                    {isHard ? <AlertTriangle className="h-5 w-5" /> : <AlertCircle className="h-5 w-5" />}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold">{v.type}</span>
-                      <Badge variant="outline" className={cfg.badgeClass}>{cfg.label}</Badge>
-                      <Badge variant="outline" className="font-mono text-xs">{v.law}</Badge>
-                      <span className="text-xs text-muted-foreground ml-auto">{v.date}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold">{violation.rule_label}</span>
+                      <Badge variant="outline" className={isHard ? 'border-destructive/20 bg-destructive/10 text-destructive' : 'border-amber-200 bg-amber-50 text-amber-700'}>
+                        {isHard ? '硬性' : '軟性'}
+                      </Badge>
+                      <Badge variant="outline" className="font-mono text-xs">{violation.rule}</Badge>
+                      <span className="ml-auto text-xs text-muted-foreground">{violation.schedule_date}</span>
                     </div>
-                    <div className="text-sm mt-2">
-                      <span className="font-medium">{v.employee}</span>
-                      <span className="text-muted-foreground"> · {v.message}</span>
-                    </div>
-                    <div className="mt-3 rounded-lg bg-indigo-50/60 border border-indigo-200/60 p-3 flex items-start gap-2 dark:bg-indigo-950/30 dark:border-indigo-800/40">
-                      <Sparkles className="h-4 w-4 text-indigo-600 shrink-0 mt-0.5" />
-                      <div className="flex-1 text-sm">
-                        <div className="text-xs font-medium text-indigo-700 dark:text-indigo-400">AI 建議</div>
-                        <div className="text-indigo-900/90 dark:text-indigo-300 mt-0.5">{v.suggestion}</div>
-                      </div>
-                      <Button size="sm" variant="outline">套用</Button>
-                    </div>
+                    <p className="mt-2 text-sm">
+                      <span className="font-medium">{violation.employee_name}</span>
+                      <span className="text-muted-foreground">（{violation.employee_code}）</span>
+                    </p>
+                    {detail && <p className="mt-2 break-words text-xs text-muted-foreground">{detail}</p>}
+                    {violation.related_dates.length > 0 && (
+                      <p className="mt-2 text-xs text-muted-foreground">相關日期：{violation.related_dates.join('、')}</p>
+                    )}
                   </div>
                 </div>
               </CardContent>

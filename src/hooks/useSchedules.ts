@@ -11,6 +11,8 @@ import type {
 } from '@/types/schedule'
 import { toast } from '@/hooks/use-toast'
 import axios from 'axios'
+import { aiApi } from '@/api/endpoints/ai'
+import type { LLMScheduleRequest } from '@/types/ai'
 
 const VERSIONS_KEY = ['scheduleVersions']
 const SCHEDULES_KEY = ['schedules']
@@ -214,6 +216,34 @@ export function useUpdateScheduleVersion() {
       qc.invalidateQueries({ queryKey: VERSIONS_KEY })
     },
     onError: () => toast({ title: '更新失敗', description: '無法更新版本', variant: 'destructive' }),
+  })
+}
+
+export function useLLMGenerateSchedule() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: LLMScheduleRequest) => aiApi.llmGenerate(data),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: SCHEDULES_KEY })
+      qc.invalidateQueries({ queryKey: VERSIONS_KEY })
+      toast({
+        title: 'AI 排班完成',
+        description: `新增 ${result.created_count} 筆班次${result.rejected_count ? `，略過 ${result.rejected_count} 筆` : ''}`,
+      })
+    },
+    onError: (error) => {
+      const status = axios.isAxiosError(error) ? error.response?.status : undefined
+      const fallback = status === 402
+        ? '本月 AI 用量已達上限'
+        : status === 409
+          ? '此版本已鎖定，請先取消簽核'
+          : status === 502
+            ? '模型目前忙碌或呼叫失敗，請稍後重試'
+            : status === 503
+              ? '後端尚未設定 LLM API key'
+              : '無法完成 AI 排班'
+      toast({ title: 'AI 排班失敗', description: parseApiErrorMessage(error, fallback), variant: 'destructive' })
+    },
   })
 }
 

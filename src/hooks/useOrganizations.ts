@@ -2,6 +2,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { organizationsApi, branchesApi } from '@/api/endpoints/organizations'
 import type { OrganizationCreateRequest, BranchCreateRequest } from '@/types/organization'
 import { toast } from '@/hooks/use-toast'
+import { authApi } from '@/api/endpoints/auth'
+import { useAuthStore } from '@/stores/authStore'
+import { parseApiErrorMessage } from '@/api/errors'
 
 const ORGS_KEY = ['organizations']
 const BRANCHES_KEY = ['branches']
@@ -25,11 +28,21 @@ export function useCreateOrganization() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: OrganizationCreateRequest) => organizationsApi.create(data),
-    onSuccess: () => {
+    onSuccess: async () => {
       qc.invalidateQueries({ queryKey: ORGS_KEY })
+      try {
+        const profile = await authApi.getMe()
+        useAuthStore.getState().setUser(profile)
+      } catch {
+        qc.invalidateQueries({ queryKey: ['auth', 'me'] })
+      }
       toast({ title: '建立成功', description: '機構已成功建立' })
     },
-    onError: () => toast({ title: '建立失敗', description: '無法建立機構', variant: 'destructive' }),
+    onError: (error) => toast({
+      title: '建立失敗',
+      description: parseApiErrorMessage(error, '無法建立機構'),
+      variant: 'destructive',
+    }),
   })
 }
 

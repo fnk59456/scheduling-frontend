@@ -12,6 +12,7 @@ import {
   useBranches, useCreateBranch, useUpdateBranch, useDeleteBranch,
 } from '@/hooks/useOrganizations'
 import type { Organization } from '@/types/organization'
+import { useAuthStore } from '@/stores/authStore'
 
 export default function OrganizationsPage() {
   const { data: orgsData, isLoading } = useOrganizations()
@@ -25,6 +26,9 @@ export default function OrganizationsPage() {
 
   const organizations = orgsData?.results ?? []
   const branches = branchesData?.results ?? []
+  const user = useAuthStore((state) => state.user)
+  const isSuperuser = !user?.role_name
+  const canCreateOrganization = isSuperuser || organizations.length === 0
 
   const [showOrgDialog, setShowOrgDialog] = useState(false)
   const [showBranchDialog, setShowBranchDialog] = useState(false)
@@ -87,7 +91,7 @@ export default function OrganizationsPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => openCreateBranch()}><Store className="h-4 w-4 mr-2" />新增分店</Button>
-          <Button onClick={openCreateOrg}><Plus className="h-4 w-4 mr-2" />新增機構</Button>
+          {canCreateOrganization && <Button onClick={openCreateOrg}><Plus className="h-4 w-4 mr-2" />新增機構</Button>}
         </div>
       </div>
 
@@ -117,9 +121,11 @@ export default function OrganizationsPage() {
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditOrg(org)}>
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => deleteOrg.mutate(org.id)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {isSuperuser && (
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => deleteOrg.mutate(org.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </CardHeader>
@@ -169,7 +175,7 @@ export default function OrganizationsPage() {
           <form onSubmit={handleSubmitOrg} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5"><Label>機構名稱</Label><Input value={orgForm.name} onChange={(e) => setOrgForm((p) => ({ ...p, name: e.target.value }))} required /></div>
-              <div className="space-y-1.5"><Label>機構代碼</Label><Input value={orgForm.code} onChange={(e) => setOrgForm((p) => ({ ...p, code: e.target.value }))} required /></div>
+              <div className="space-y-1.5"><Label>機構代碼{editingOrg ? '' : '（可留空）'}</Label><Input value={orgForm.code} onChange={(e) => setOrgForm((p) => ({ ...p, code: e.target.value }))} required={!!editingOrg} placeholder={editingOrg ? undefined : '系統自動產生'} /></div>
             </div>
             <div className="space-y-1.5"><Label>Email</Label><Input type="email" value={orgForm.email} onChange={(e) => setOrgForm((p) => ({ ...p, email: e.target.value }))} /></div>
             <div className="space-y-1.5"><Label>電話</Label><Input value={orgForm.phone} onChange={(e) => setOrgForm((p) => ({ ...p, phone: e.target.value }))} /></div>

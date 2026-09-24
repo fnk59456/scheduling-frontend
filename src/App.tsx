@@ -25,6 +25,8 @@ import CompliancePage from '@/pages/compliance/CompliancePage'
 import AIAssistantPage from '@/pages/ai/AIAssistantPage'
 import AuditPage from '@/pages/audit/AuditPage'
 import PlaceholderPage from '@/pages/PlaceholderPage'
+import OrganizationOnboardingPage from '@/pages/OrganizationOnboardingPage'
+import ComplianceSettingsPage from '@/pages/settings/ComplianceSettingsPage'
 import { Toaster } from '@/components/ui/toaster'
 import './index.css'
 
@@ -53,6 +55,7 @@ function App() {
                   <MainLayout>
                     <Routes>
                       <Route path="/dashboard" element={<DashboardPage />} />
+                      <Route path="/onboarding/organization" element={<OrganizationOnboardingPage />} />
 
                       {/* 員工管理 */}
                       <Route path="/employees" element={<EmployeesPage />} />
@@ -67,6 +70,7 @@ function App() {
                         <Route path="organizations" element={<OrganizationsPage />} />
                         <Route path="certifications" element={<CertificationsPage />} />
                         <Route path="leaves" element={<LeaveSettingsPage />} />
+                        <Route path="compliance" element={<ComplianceSettingsPage />} />
                       </Route>
 
                       {/* 後續週次功能佔位 */}
@@ -89,6 +93,7 @@ function App() {
                     <MainLayout>
                       <Routes>
                         <Route path="/dashboard" element={<DashboardPage />} />
+                        <Route path="/onboarding/organization" element={<OrganizationOnboardingPage />} />
 
                         {/* 員工管理 */}
                         <Route path="/employees" element={<EmployeesPage />} />
@@ -102,6 +107,7 @@ function App() {
                           <Route path="rules" element={<ShiftRulesPage />} />
                           <Route path="certifications" element={<CertificationsPage />} />
                           <Route path="leaves" element={<LeaveSettingsPage />} />
+                          <Route path="compliance" element={<ComplianceSettingsPage />} />
                         </Route>
 
                         {/* 後續週次功能佔位 */}

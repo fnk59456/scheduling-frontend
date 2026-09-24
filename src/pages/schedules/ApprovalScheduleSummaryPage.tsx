@@ -84,7 +84,8 @@ export default function ApprovalScheduleSummaryPage() {
   const [searchParams] = useSearchParams()
   const [orgId, setOrgId] = useState(searchParams.get('organization') ?? '')
   const [branchId, setBranchId] = useState(searchParams.get('branch') ?? 'all')
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
+  const [dateFrom, setDateFrom] = useState(() => formatDate(startOfWeek(new Date())))
+  const [dateTo, setDateTo] = useState(() => formatDate(addDays(startOfWeek(new Date()), 6)))
   const [activeConflict, setActiveConflict] = useState<ApprovedTimelineConflict | null>(null)
   const [decisionType, setDecisionType] = useState<ScheduleOverlapDecisionType>('select')
   const [selectedScheduleIds, setSelectedScheduleIds] = useState<number[]>([])
@@ -113,18 +114,39 @@ export default function ApprovalScheduleSummaryPage() {
     if (branchIdResolved && !branches.some((branch) => branch.id === branchIdResolved)) setBranchId('all')
   }, [branchIdResolved, branches])
 
-  const weekDays = useMemo(
-    () => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)),
-    [weekStart],
-  )
-  const dateFrom = formatDate(weekDays[0])
-  const dateTo = formatDate(weekDays[6])
+  const rangeDays = useMemo(() => {
+    const start = new Date(`${dateFrom}T00:00:00`)
+    const end = new Date(`${dateTo}T00:00:00`)
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return []
+    const length = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1
+    if (length > 62) return []
+    return Array.from({ length }, (_, index) => addDays(start, index))
+  }, [dateFrom, dateTo])
+
+  const shiftRange = (direction: -1 | 1) => {
+    if (rangeDays.length === 0) return
+    const offset = rangeDays.length * direction
+    setDateFrom(formatDate(addDays(rangeDays[0], offset)))
+    setDateTo(formatDate(addDays(rangeDays[rangeDays.length - 1], offset)))
+  }
+
+  const selectThisWeek = () => {
+    const start = startOfWeek(new Date())
+    setDateFrom(formatDate(start))
+    setDateTo(formatDate(addDays(start, 6)))
+  }
+
+  const selectThisMonth = () => {
+    const today = new Date()
+    setDateFrom(formatDate(new Date(today.getFullYear(), today.getMonth(), 1)))
+    setDateTo(formatDate(new Date(today.getFullYear(), today.getMonth() + 1, 0)))
+  }
 
   const approvedLeavesQuery = useLeaveRequests({
     status: 'approved',
     date_from: dateFrom,
     date_to: dateTo,
-  }, { enabled: !!orgIdResolved, allPages: true })
+  }, { enabled: !!orgIdResolved && rangeDays.length > 0, allPages: true })
   const approvedLeaves = approvedLeavesQuery.data?.results ?? []
   const leaveDateMap = useMemo(() => approvedLeaveDateMap(approvedLeaves), [approvedLeaves])
 
@@ -137,7 +159,7 @@ export default function ApprovalScheduleSummaryPage() {
       date_from: dateFrom,
       date_to: dateTo,
     }),
-    enabled: !!orgIdResolved,
+    enabled: !!orgIdResolved && rangeDays.length > 0,
   })
 
   const employeesQuery = useQuery({
@@ -308,14 +330,20 @@ export default function ApprovalScheduleSummaryPage() {
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">週排班總表</CardTitle>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" onClick={() => setWeekStart(addDays(weekStart, -7))}><ChevronLeft className="h-4 w-4" /></Button>
-            <span className="min-w-48 text-center text-sm font-medium">{dateFrom} ～ {dateTo}</span>
-            <Button variant="outline" size="icon" onClick={() => setWeekStart(addDays(weekStart, 7))}><ChevronRight className="h-4 w-4" /></Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button variant="outline" size="icon" onClick={() => shiftRange(-1)}><ChevronLeft className="h-4 w-4" /></Button>
+            <Input type="date" className="w-36" value={dateFrom} max={dateTo} onChange={(event) => setDateFrom(event.target.value)} aria-label="總表開始日期" />
+            <span className="text-sm text-muted-foreground">至</span>
+            <Input type="date" className="w-36" value={dateTo} min={dateFrom} onChange={(event) => setDateTo(event.target.value)} aria-label="總表結束日期" />
+            <Button variant="outline" size="icon" onClick={() => shiftRange(1)}><ChevronRight className="h-4 w-4" /></Button>
+            <Button variant="ghost" size="sm" onClick={selectThisWeek}>本週</Button>
+            <Button variant="ghost" size="sm" onClick={selectThisMonth}>本月</Button>
           </div>
         </CardHeader>
         <CardContent>
-          {loading ? (
+          {rangeDays.length === 0 ? (
+            <div className="py-12 text-center text-sm text-destructive">日期區間需由早到晚，且最多 62 天。</div>
+          ) : loading ? (
             <div className="flex h-48 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
           ) : hasError ? (
             <div className="py-12 text-center">
@@ -325,12 +353,12 @@ export default function ApprovalScheduleSummaryPage() {
           ) : (
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full min-w-[1100px] border-collapse text-sm">
-                <thead><tr className="bg-muted/50"><th className="w-52 border-b p-3 text-left">員工</th>{weekDays.map((day, index) => <th key={formatDate(day)} className="border-b p-3 text-left"><span>{weekdayLabels[index]}</span><span className="ml-2 text-muted-foreground">{formatDate(day).slice(5)}</span></th>)}</tr></thead>
+                <thead><tr className="bg-muted/50"><th className="w-52 border-b p-3 text-left">員工</th>{rangeDays.map((day) => <th key={formatDate(day)} className="border-b p-3 text-left"><span>{weekdayLabels[(day.getDay() + 6) % 7]}</span><span className="ml-2 text-muted-foreground">{formatDate(day).slice(5)}</span></th>)}</tr></thead>
                 <tbody>
                   {employees.map((employee) => (
                     <tr key={employee.id} className="border-b last:border-0">
                       <td className="p-3 align-top"><p className="font-medium">{employeeName(employee)}</p><p className="text-xs text-muted-foreground">{employee.employee_id} · {employee.position}</p></td>
-                      {weekDays.map((day) => {
+                      {rangeDays.map((day) => {
                         const date = formatDate(day)
                         const schedules = schedulesByCell.get(`${employee.id}:${date}`) ?? []
                         const leaves = approvedLeaveFor(leaveDateMap, employee.id, date)
