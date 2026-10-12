@@ -18,4 +18,14 @@ export const overtimeApi = {
     )
     return { count: results.length, next: null, previous: null, results } satisfies PaginatedResponse<OvertimeRecord>
   },
+
+  update: (id: number, data: { multiplier?: string; notes?: string }) =>
+    apiClient
+      .patch<OvertimeRecord>(`/overtime/records/${id}/`, data)
+      .then((response) => response.data),
+
+  calculate: (attendanceId: number) =>
+    apiClient
+      .post<OvertimeRecord[]>('/overtime/records/calculate/', { attendance_id: attendanceId })
+      .then((response) => response.data),
 }

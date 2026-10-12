@@ -1,10 +1,20 @@
 import apiClient from '@/api/client'
 import type { PaginatedResponse } from '@/types/api'
 import type { Attendance, AnomalyRecord } from '@/types/attendance'
+import { fetchAllPages } from '@/api/pagination'
 
 export const attendanceApi = {
   list: (params?: { employee?: number; date_from?: string; date_to?: string; anomaly?: boolean }) =>
     apiClient.get<PaginatedResponse<Attendance>>('/attendance/attendances/', { params }).then((r) => r.data),
+
+  listAll: async (params?: { employee?: number; date_from?: string; date_to?: string; anomaly?: boolean }) => {
+    const results = await fetchAllPages<Attendance>((page) =>
+      apiClient
+        .get<PaginatedResponse<Attendance>>('/attendance/attendances/', { params: { ...params, page } })
+        .then((response) => response.data),
+    )
+    return { count: results.length, next: null, previous: null, results } satisfies PaginatedResponse<Attendance>
+  },
 
   clockIn: () =>
     apiClient.post<Attendance>('/attendance/attendances/clock_in/', {}).then((r) => r.data),

@@ -4,10 +4,14 @@ import { toast } from '@/hooks/use-toast'
 
 const ATTENDANCE_KEY = ['attendances']
 
-export function useAttendances(params?: { employee?: number; date_from?: string; date_to?: string; anomaly?: boolean }) {
+export function useAttendances(
+  params?: { employee?: number; date_from?: string; date_to?: string; anomaly?: boolean },
+  options?: { enabled?: boolean; allPages?: boolean },
+) {
   return useQuery({
-    queryKey: [...ATTENDANCE_KEY, params],
-    queryFn: () => attendanceApi.list(params),
+    queryKey: [...ATTENDANCE_KEY, options?.allPages ? 'all' : 'page', params],
+    queryFn: () => options?.allPages ? attendanceApi.listAll(params) : attendanceApi.list(params),
+    enabled: options?.enabled ?? true,
   })
 }
 
