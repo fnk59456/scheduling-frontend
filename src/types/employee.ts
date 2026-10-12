@@ -8,6 +8,7 @@ export interface Certification {
 }
 
 export type ContractType = 'full_time' | 'part_time' | 'dispatch'
+export type PayType = 'monthly' | 'hourly'
 
 export interface Contract {
   id: number
@@ -42,6 +43,8 @@ export interface Employee {
   position: string
   contract_type: ContractType
   contract_type_display: string
+  pay_type: PayType
+  pay_type_display: string
   agreed_hours_per_week: string
   certifications: Certification[]
   certification_ids: number[]
@@ -65,6 +68,7 @@ export interface EmployeeListItem {
   position: string
   contract_type: ContractType
   contract_type_display: string
+  pay_type: PayType
   certification_count: number
   hire_date: string
   is_active: boolean
@@ -83,6 +87,7 @@ export interface EmployeeCreateRequest {
   branch: number
   position: string
   contract_type: ContractType
+  pay_type?: PayType
   agreed_hours_per_week: number
   certification_ids?: number[]
   hire_date: string
@@ -101,6 +106,7 @@ export interface EmployeeUpdateRequest {
   branch?: number
   position?: string
   contract_type?: ContractType
+  pay_type?: PayType
   agreed_hours_per_week?: number
   certification_ids?: number[]
   is_active?: boolean

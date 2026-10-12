@@ -18,6 +18,11 @@ const contractTypeLabels: Record<string, string> = {
   dispatch: '派遣',
 }
 
+const payTypeLabels: Record<string, string> = {
+  monthly: '月薪制',
+  hourly: '時薪制',
+}
+
 const AVATAR_COLORS = [
   'bg-blue-500',
   'bg-emerald-500',
@@ -79,6 +84,12 @@ export default function EmployeesPage() {
       render: (row) => (
         <Badge variant="secondary">{contractTypeLabels[row.contract_type] || row.contract_type_display}</Badge>
       ),
+    },
+    {
+      key: 'pay_type',
+      title: '薪制',
+      sortable: true,
+      render: (row) => <Badge variant="outline">{payTypeLabels[row.pay_type] || row.pay_type}</Badge>,
     },
     { key: 'branch_name', title: '分店', sortable: true },
     {

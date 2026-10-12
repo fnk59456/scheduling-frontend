@@ -246,16 +246,6 @@ export default function SchedulesPage() {
   const organizations = orgsData?.results ?? []
   const branches = branchesData?.results ?? []
 
-  const { data: employeesData, isLoading: employeesLoading } = useEmployees({
-    is_active: true,
-    organization: orgIdResolved ?? undefined,
-    branch: branchId === 'all' ? undefined : Number(branchId),
-  }, {
-    enabled: !!orgIdResolved,
-    allPages: true,
-  })
-  const employees = employeesData?.results ?? []
-
   const { data: templatesData } = useShiftTemplates({
     organization: orgIdResolved ?? undefined,
     is_active: true,
@@ -293,6 +283,18 @@ export default function SchedulesPage() {
 
   const selectedVersion = visibleVersions.find((v) => String(v.id) === versionId) ?? null
   const canEditSelectedVersion = selectedVersion?.status === 'draft'
+  const effectiveBranchId = selectedVersion
+    ? selectedVersion.branch ?? undefined
+    : branchId === 'all' ? undefined : Number(branchId)
+  const { data: employeesData, isLoading: employeesLoading } = useEmployees({
+    is_active: true,
+    organization: orgIdResolved ?? undefined,
+    branch: effectiveBranchId,
+  }, {
+    enabled: !!orgIdResolved,
+    allPages: true,
+  })
+  const employees = employeesData?.results ?? []
   const complianceSettingsQuery = useComplianceSettings(!!selectedVersion)
   const weeklyClosedDays = useMemo(
     () => new Set(complianceSettingsQuery.data?.weekly_closed_days ?? []),
@@ -330,6 +332,11 @@ export default function SchedulesPage() {
     setVersionNavigationDate(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedVersion?.id])
+
+  useEffect(() => {
+    if (!selectedVersion) return
+    setBranchId(selectedVersion.branch === null ? 'all' : String(selectedVersion.branch))
+  }, [selectedVersion?.id, selectedVersion?.branch])
 
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart])
   const dateFrom = fmtDate(weekDays[0])
@@ -474,7 +481,18 @@ export default function SchedulesPage() {
   const [showLLMScheduleDialog, setShowLLMScheduleDialog] = useState(false)
   const [llmPeriodStart, setLlmPeriodStart] = useState('')
   const [llmPeriodEnd, setLlmPeriodEnd] = useState('')
+  const [allowMultipleShiftsPerDay, setAllowMultipleShiftsPerDay] = useState(false)
   const [llmResult, setLlmResult] = useState<LLMScheduleResult | null>(null)
+  const orderedLlmWarnings = useMemo(() => {
+    const warnings = [...(llmResult?.warnings ?? [])]
+    const rank = (warning: string) => {
+      if (/範圍|排除|其他分店|不在.*分店/.test(warning)) return 0
+      if (/0\s*班|零班|未排到|沒有排到/.test(warning)) return 1
+      if (/最低人力|min_staff|人力不足/.test(warning)) return 2
+      return 3
+    }
+    return warnings.sort((a, b) => rank(a) - rank(b))
+  }, [llmResult])
 
   // ===== 拖曳狀態 =====
   type DragSource = {
@@ -552,6 +570,7 @@ export default function SchedulesPage() {
     if (!selectedVersion) return
     setLlmPeriodStart(dateFrom)
     setLlmPeriodEnd(dateTo)
+    setAllowMultipleShiftsPerDay(false)
     setShowLLMScheduleDialog(true)
   }
 
@@ -565,6 +584,7 @@ export default function SchedulesPage() {
         period_start: llmPeriodStart,
         period_end: llmPeriodEnd,
         consume_token: true,
+        allow_multiple_shifts_per_day: allowMultipleShiftsPerDay,
       })
       setShowLLMScheduleDialog(false)
       setWeekStart(startOfWeek(parseDate(llmPeriodStart)))
@@ -723,9 +743,7 @@ export default function SchedulesPage() {
     const monthStart = startOfMonth(weekStart)
     setVersionForm({
       organization: String(orgIdResolved),
-      branch: selectedVersion?.branch
-        ? String(selectedVersion.branch)
-        : branchId !== 'all' ? branchId : '',
+      branch: '',
       version_label: buildVersionLabel(monthStart, endOfMonth(monthStart)),
     })
     setShowVersionDialog(true)
@@ -972,9 +990,7 @@ export default function SchedulesPage() {
         employeesApi.listAll({
           is_active: true,
           organization: selectedVersion.organization,
-          branch: branchId === 'all'
-            ? (selectedVersion.branch ?? undefined)
-            : Number(branchId),
+          branch: selectedVersion.branch ?? undefined,
         }),
         leavesApi.listAll({
           status: 'approved',
@@ -1079,11 +1095,15 @@ export default function SchedulesPage() {
             {!orgIdResolved && <p className="text-xs text-destructive mt-1">請先指定機構</p>}
           </div>
           <div className="space-y-1.5">
-            <Label className="flex h-7 items-center">分店</Label>
-            <Select value={branchId} onValueChange={setBranchId}>
+            <Label className="flex h-7 items-center">{selectedVersion?.branch ? '版本分店' : '分店'}</Label>
+            <Select
+              value={branchId}
+              onValueChange={setBranchId}
+              disabled={!!selectedVersion}
+            >
               <SelectTrigger><SelectValue placeholder="選擇分店" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部</SelectItem>
+                <SelectItem value="all">全部分店</SelectItem>
                 {branches.map((b) => <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>)}
               </SelectContent>
             </Select>
@@ -1137,6 +1157,13 @@ export default function SchedulesPage() {
             )}
           </div>
         </CardContent>
+        {selectedVersion?.branch !== null && selectedVersion?.branch !== undefined && (
+          <CardContent className="pt-0">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+              此版本僅排「{selectedVersion.branch_name ?? '指定分店'}」，其他分店員工不會出現在班表。
+            </div>
+          </CardContent>
+        )}
         <CardContent className="pt-0">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -1671,6 +1698,19 @@ export default function SchedulesPage() {
               {llmRangeError ?? `共 ${llmRangeDays} 天`}
             </div>
 
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+                checked={allowMultipleShiftsPerDay}
+                onChange={(event) => setAllowMultipleShiftsPerDay(event.target.checked)}
+              />
+              <span>
+                <span className="block font-medium">允許同一人同一天排不同崗位的班（分段班）</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">預設關閉；開啟後仍會依班次時間與排班規則驗證。</span>
+              </span>
+            </label>
+
             <DialogFooter>
               <Button
                 type="button"
@@ -1699,11 +1739,23 @@ export default function SchedulesPage() {
               已新增 {llmResult?.created_count ?? 0} 筆班次，模型 {llmResult?.model ?? ''}。
             </DialogDescription>
           </DialogHeader>
-          {(llmResult?.warnings.length ?? 0) > 0 && (
+          {orderedLlmWarnings.length > 0 && (
             <section className="space-y-2">
-              <h3 className="font-medium text-amber-700">人力缺口提醒</h3>
+              <h3 className="font-medium text-amber-700">AI 排班提醒</h3>
               <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-sm text-amber-900">
-                {llmResult?.warnings.map((warning, index) => <p key={`${warning}-${index}`}>{warning}</p>)}
+                {orderedLlmWarnings.map((warning, index) => (
+                  <p
+                    key={`${warning}-${index}`}
+                    className={cn(
+                      'whitespace-pre-wrap break-words rounded px-2 py-1',
+                      index === 0 && (llmResult?.scope?.employees_out_of_scope.length ?? 0) > 0
+                        ? 'bg-amber-100 font-medium'
+                        : undefined,
+                    )}
+                  >
+                    {warning}
+                  </p>
+                ))}
               </div>
             </section>
           )}
@@ -1723,7 +1775,20 @@ export default function SchedulesPage() {
           {(llmResult?.warnings.length ?? 0) === 0 && (llmResult?.rejected.length ?? 0) === 0 && (
             <p className="rounded-lg bg-emerald-50 p-4 text-sm text-emerald-800">所有回傳班次均已通過驗證。</p>
           )}
-          <DialogFooter><Button onClick={() => setLlmResult(null)}>完成</Button></DialogFooter>
+          <DialogFooter>
+            {(llmResult?.scope?.employees_out_of_scope.length ?? 0) > 0 && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setLlmResult(null)
+                  openVersionDialog()
+                }}
+              >
+                建立不限分店的版本
+              </Button>
+            )}
+            <Button onClick={() => setLlmResult(null)}>完成</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1839,17 +1904,21 @@ export default function SchedulesPage() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label>分店（可選）</Label>
+                <Label>排班範圍</Label>
                 <Select
                   value={versionForm.branch}
                   onValueChange={(v) => setVersionForm((p) => ({ ...p, branch: v === '__none__' ? '' : v }))}
                 >
-                  <SelectTrigger><SelectValue placeholder="不指定" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="不限分店（全機構）" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none__">不指定</SelectItem>
+                    <SelectItem value="__none__">不限分店（全機構）</SelectItem>
                     {branches.map((b) => <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  選擇分店後，AI 只會安排該分店員工；留空則安排全機構。
+                  {branchId !== 'all' ? `目前頁面篩選：${branches.find((b) => String(b.id) === branchId)?.name ?? '指定分店'}。` : ''}
+                </p>
               </div>
             </div>
 

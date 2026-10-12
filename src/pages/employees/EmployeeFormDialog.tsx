@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { useCreateEmployee, useDeleteEmployee, useUpdateEmployee } from '@/hooks/useEmployees'
 import { useBranches, useOrganizations } from '@/hooks/useOrganizations'
-import type { ContractType, Employee } from '@/types/employee'
+import type { ContractType, Employee, PayType } from '@/types/employee'
 
 interface Props {
   open: boolean
@@ -20,6 +20,7 @@ const emptyForm = {
   username: '', email: '', password: '', first_name: '', last_name: '',
   employee_id: '', organization: '', branch: '', position: '',
   contract_type: 'full_time' as ContractType,
+  pay_type: 'monthly' as PayType,
   agreed_hours_per_week: '40', hire_date: '',
 }
 
@@ -66,6 +67,7 @@ export function EmployeeFormDialog({ open, onOpenChange, employee, onDeleted }: 
       branch: employee.branch ? String(employee.branch) : '',
       position: employee.position ?? '',
       contract_type: employee.contract_type,
+      pay_type: employee.pay_type ?? 'monthly',
       agreed_hours_per_week: String(employee.agreed_hours_per_week ?? '40'),
       hire_date: employee.hire_date ?? '',
     })
@@ -108,6 +110,7 @@ export function EmployeeFormDialog({ open, onOpenChange, employee, onDeleted }: 
       employee_id: form.employee_id,
       position: form.position,
       contract_type: form.contract_type,
+      pay_type: form.pay_type,
       agreed_hours_per_week: Number(form.agreed_hours_per_week),
       hire_date: form.hire_date,
     }
@@ -236,7 +239,7 @@ export function EmployeeFormDialog({ open, onOpenChange, employee, onDeleted }: 
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div className="space-y-1.5">
               <Label>契約類型</Label>
               <Select value={form.contract_type} onValueChange={(v) => set('contract_type', v)}>
@@ -245,6 +248,16 @@ export function EmployeeFormDialog({ open, onOpenChange, employee, onDeleted }: 
                   <SelectItem value="full_time">全職</SelectItem>
                   <SelectItem value="part_time">兼職</SelectItem>
                   <SelectItem value="dispatch">派遣</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>薪制</Label>
+              <Select value={form.pay_type} onValueChange={(v) => set('pay_type', v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="monthly">月薪制</SelectItem>
+                  <SelectItem value="hourly">時薪制</SelectItem>
                 </SelectContent>
               </Select>
             </div>

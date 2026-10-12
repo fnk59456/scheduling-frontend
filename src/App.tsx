@@ -71,6 +71,7 @@ function App() {
                         <Route path="certifications" element={<CertificationsPage />} />
                         <Route path="leaves" element={<LeaveSettingsPage />} />
                         <Route path="compliance" element={<ComplianceSettingsPage />} />
+                        <Route path="*" element={<Navigate to="/settings/shifts" replace />} />
                       </Route>
 
                       {/* 後續週次功能佔位 */}
@@ -104,10 +105,12 @@ function App() {
                           <Route index element={<Navigate to="/settings/organizations" replace />} />
                           <Route path="organizations" element={<OrganizationsPage />} />
                           <Route path="shifts" element={<ShiftTemplatesPage />} />
+                          <Route path="priorities" element={<EmployeePrioritiesPage />} />
                           <Route path="rules" element={<ShiftRulesPage />} />
                           <Route path="certifications" element={<CertificationsPage />} />
                           <Route path="leaves" element={<LeaveSettingsPage />} />
                           <Route path="compliance" element={<ComplianceSettingsPage />} />
+                          <Route path="*" element={<Navigate to="/settings/organizations" replace />} />
                         </Route>
 
                         {/* 後續週次功能佔位 */}

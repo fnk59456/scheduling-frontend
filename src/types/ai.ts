@@ -146,6 +146,7 @@ export interface LLMScheduleRequest {
   period_start?: string
   period_end?: string
   consume_token?: boolean
+  allow_multiple_shifts_per_day?: boolean
 }
 
 export interface LLMRejectedAssignment {
@@ -164,6 +165,15 @@ export interface LLMScheduleResult {
   }>
   rejected: LLMRejectedAssignment[]
   warnings: string[]
+  scope: {
+    branch_id: number | null
+    branch_name: string | null
+    employees_in_scope: number[]
+    employees_out_of_scope: number[]
+  }
+  options: {
+    allow_multiple_shifts_per_day: boolean
+  }
   model: string
   engine: 'llm'
   billing: null | {
