@@ -5,6 +5,7 @@ export type ComplianceRuleKey =
   | 'max_consecutive_days'
   | 'min_rest_hours'
   | 'max_daily_hours'
+  | 'weekly_rest_days'
 
 export interface OrgComplianceSettings {
   id: number
@@ -27,4 +28,19 @@ export interface HolidayCreateRequest {
   organization: number
   date: string
   name: string
+}
+
+export interface CalendarHoliday {
+  id: number | null
+  date: string
+  name: string
+  kind: 'holiday' | 'makeup'
+  source: 'national' | 'org'
+}
+
+export interface HolidayCalendarResponse {
+  start: string
+  end: string
+  count: number
+  holidays: CalendarHoliday[]
 }

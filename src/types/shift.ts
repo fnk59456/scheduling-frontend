@@ -109,3 +109,33 @@ export interface ShiftEmployeePriorityUpdateItem {
   priority_rank: number
   max_extra_shifts: number | null
 }
+
+export interface StaffingRequirement {
+  id: number
+  organization: number
+  branch: number | null
+  branch_name: string | null
+  shift_template: number | null
+  shift_template_name: string | null
+  weekday: number | null
+  weekday_label: string | null
+  date: string | null
+  min_staff: number
+  max_staff: number | null
+  note: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface StaffingRequirementCreateRequest {
+  organization?: number
+  branch?: number | null
+  shift_template?: number | null
+  weekday?: number | null
+  date?: string | null
+  min_staff: number
+  max_staff?: number | null
+  note?: string
+  is_active?: boolean
+}

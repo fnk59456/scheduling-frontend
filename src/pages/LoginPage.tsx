@@ -5,8 +5,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { BrandLogo } from '@/components/BrandLogo'
 import { useAuth } from '@/hooks/useAuth'
+import { authApi } from '@/api/endpoints/auth'
+import { parseApiErrorMessage } from '@/api/errors'
+import { toast } from '@/hooks/use-toast'
 
 const BYPASS_AUTH = String(import.meta.env.VITE_BYPASS_AUTH || '').toLowerCase() === 'true'
 
@@ -16,7 +20,17 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false)
-  const { login, loginWithGoogle, googleLoginAvailable, isAuthenticated } = useAuth()
+  const [registerEmail, setRegisterEmail] = useState('')
+  const [verificationCode, setVerificationCode] = useState('')
+  const [registerPassword, setRegisterPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [isSendingCode, setIsSendingCode] = useState(false)
+  const [isRegistering, setIsRegistering] = useState(false)
+  const [cooldown, setCooldown] = useState(0)
+  const [debugCode, setDebugCode] = useState('')
+  const { login, register, loginWithGoogle, googleLoginAvailable, isAuthenticated } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -25,6 +39,12 @@ export default function LoginPage() {
   useEffect(() => {
     if (isAuthenticated) navigate(from, { replace: true })
   }, [from, isAuthenticated, navigate])
+
+  useEffect(() => {
+    if (cooldown <= 0) return
+    const timer = window.setInterval(() => setCooldown((value) => Math.max(0, value - 1)), 1000)
+    return () => window.clearInterval(timer)
+  }, [cooldown])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -52,6 +72,53 @@ export default function LoginPage() {
     }
   }
 
+  const handleSendCode = async () => {
+    if (!registerEmail || cooldown > 0) return
+    setIsSendingCode(true)
+    try {
+      const result = await authApi.sendRegistrationCode({ email: registerEmail })
+      setCooldown(result.cooldown_seconds || 60)
+      setDebugCode(result.debug_code || '')
+      toast({ title: '驗證碼已送出', description: result.message })
+    } catch (error) {
+      const retryAfter = Number((error as { response?: { data?: { retry_after_seconds?: unknown } } })?.response?.data?.retry_after_seconds)
+      if (Number.isFinite(retryAfter) && retryAfter > 0) setCooldown(retryAfter)
+      toast({
+        title: '無法送出驗證碼',
+        description: Number.isFinite(retryAfter) && retryAfter > 0
+          ? `請求太頻繁，請 ${retryAfter} 秒後再試。`
+          : parseApiErrorMessage(error, '請檢查 Email 後再試一次'),
+        variant: 'destructive',
+      })
+    } finally {
+      setIsSendingCode(false)
+    }
+  }
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!registerEmail || !verificationCode || !registerPassword) return
+    if (registerPassword !== confirmPassword) {
+      toast({ title: '密碼不一致', description: '請重新確認兩次輸入的密碼。', variant: 'destructive' })
+      return
+    }
+    setIsRegistering(true)
+    try {
+      await register({
+        email: registerEmail,
+        code: verificationCode,
+        password: registerPassword,
+        first_name: firstName || undefined,
+        last_name: lastName || undefined,
+      })
+      navigate('/dashboard', { replace: true })
+    } catch {
+      // error handled in useAuth
+    } finally {
+      setIsRegistering(false)
+    }
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 p-4">
       <div className="w-full max-w-md space-y-8">
@@ -65,12 +132,18 @@ export default function LoginPage() {
 
         <Card className="shadow-xl border-primary/10">
           <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl text-center">登入</CardTitle>
+            <CardTitle className="text-2xl text-center">帳號入口</CardTitle>
             <CardDescription className="text-center">
-              使用 Google 或系統帳號登入
+              使用既有帳號登入，或驗證 Email 建立新帳號
             </CardDescription>
           </CardHeader>
           <CardContent>
+            <Tabs defaultValue="login">
+              <TabsList className="mb-5 grid w-full grid-cols-2">
+                <TabsTrigger value="login">登入</TabsTrigger>
+                <TabsTrigger value="register">註冊</TabsTrigger>
+              </TabsList>
+              <TabsContent value="login">
             <Button
               type="button"
               variant="outline"
@@ -161,6 +234,67 @@ export default function LoginPage() {
                 </Button>
               ) : null}
             </form>
+              </TabsContent>
+
+              <TabsContent value="register">
+                <form onSubmit={handleRegister} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="last-name">姓氏</Label>
+                      <Input id="last-name" value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="first-name">名字</Label>
+                      <Input id="first-name" value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="register-email">Email</Label>
+                    <Input
+                      id="register-email"
+                      type="email"
+                      value={registerEmail}
+                      onChange={(e) => setRegisterEmail(e.target.value)}
+                      placeholder="name@example.com"
+                      required
+                      autoComplete="email"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="verification-code">驗證碼</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="verification-code"
+                        value={verificationCode}
+                        onChange={(e) => setVerificationCode(e.target.value)}
+                        placeholder="6 位數驗證碼"
+                        inputMode="numeric"
+                        maxLength={6}
+                        required
+                      />
+                      <Button type="button" variant="outline" className="shrink-0" onClick={handleSendCode} disabled={!registerEmail || isSendingCode || cooldown > 0}>
+                        {isSendingCode ? <Loader2 className="h-4 w-4 animate-spin" /> : cooldown > 0 ? `${cooldown} 秒` : '取得驗證碼'}
+                      </Button>
+                    </div>
+                    {debugCode ? <p className="text-xs text-amber-700">開發模式驗證碼：{debugCode}</p> : null}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="register-password">密碼</Label>
+                    <Input id="register-password" type="password" minLength={8} value={registerPassword} onChange={(e) => setRegisterPassword(e.target.value)} required autoComplete="new-password" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="confirm-password">再次輸入密碼</Label>
+                    <Input id="confirm-password" type="password" minLength={8} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required autoComplete="new-password" />
+                  </div>
+                  <Button type="submit" className="h-11 w-full" disabled={isRegistering || isSendingCode}>
+                    {isRegistering ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />建立帳號中...</> : '建立帳號'}
+                  </Button>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    註冊後會先建立管理帳號，再引導您完成機構資料。
+                  </p>
+                </form>
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
 

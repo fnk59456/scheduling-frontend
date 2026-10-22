@@ -26,6 +26,19 @@ export interface Attendance {
   updated_at: string
 }
 
+export interface AttendanceCreateRequest {
+  employee_id: number
+  work_date: string
+  clock_in: string
+  clock_out: string
+  notes?: string
+}
+
+export type AttendanceUpdateRequest = Partial<Pick<
+  AttendanceCreateRequest,
+  'clock_in' | 'clock_out' | 'notes'
+>>
+
 export type AnomalyType =
   | 'late'
   | 'early_leave'

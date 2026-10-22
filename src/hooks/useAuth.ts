@@ -13,6 +13,7 @@ import { queryClient } from '@/api/queryClient'
 import { toast } from '@/hooks/use-toast'
 import { isAxiosError } from 'axios'
 import { parseApiErrorMessage } from '@/api/errors'
+import type { RegisterRequest } from '@/types/auth'
 
 export function useAuth() {
   const {
@@ -93,7 +94,7 @@ export function useAuth() {
       setDevApiToken(null)
       setAuthMethod(null)
 
-      const res = await authApi.login({ username, password })
+      const res = await authApi.login(username.includes('@') ? { email: username, password } : { username, password })
       setDevApiToken(res.token)
       setAuthMethod('token')
       setUser(res.user)
@@ -107,6 +108,32 @@ export function useAuth() {
           ? error.message
           : '登入失敗，請檢查帳號密碼'
       toast({ title: '登入失敗', description: message, variant: 'destructive' })
+      throw error
+    } finally {
+      setLoading(false)
+    }
+  }, [setAuthMethod, setDevApiToken, setUser, setLoading])
+
+  const register = useCallback(async (data: RegisterRequest) => {
+    try {
+      setLoading(true)
+      if (auth?.currentUser) await signOut(auth)
+      queryClient.clear()
+      setDevApiToken(null)
+      setAuthMethod(null)
+
+      const res = await authApi.register(data)
+      setDevApiToken(res.token)
+      setAuthMethod('token')
+      setUser(res.user)
+      toast({ title: '註冊成功', description: '帳號已建立，接著完成機構設定。' })
+      return res.user
+    } catch (error: unknown) {
+      toast({
+        title: '註冊失敗',
+        description: parseApiErrorMessage(error, '無法完成註冊，請確認驗證碼與密碼'),
+        variant: 'destructive',
+      })
       throw error
     } finally {
       setLoading(false)
@@ -175,6 +202,7 @@ export function useAuth() {
     isAuthenticated,
     isLoading,
     login,
+    register,
     loginWithGoogle,
     logout,
     googleLoginAvailable: isFirebaseConfigured,

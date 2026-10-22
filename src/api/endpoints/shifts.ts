@@ -8,6 +8,8 @@ import type {
   ShiftEmployeePriorityUpdateItem,
   TeamConstraint,
   TeamConstraintCreateRequest,
+  StaffingRequirement,
+  StaffingRequirementCreateRequest,
 } from '@/types/shift'
 import type { PaginatedResponse } from '@/types/api'
 
@@ -73,4 +75,17 @@ export const teamConstraintsApi = {
 
   delete: (id: number) =>
     apiClient.delete(`/shifts/team-constraints/${id}/`),
+}
+
+export const staffingRequirementsApi = {
+  list: (params?: { branch?: string; shift_template?: string; weekday?: number; date?: string; is_active?: boolean }) =>
+    apiClient.get<PaginatedResponse<StaffingRequirement>>('/shifts/staffing-requirements/', { params }).then((r) => r.data),
+
+  create: (data: StaffingRequirementCreateRequest) =>
+    apiClient.post<StaffingRequirement>('/shifts/staffing-requirements/', data).then((r) => r.data),
+
+  update: (id: number, data: Partial<StaffingRequirementCreateRequest>) =>
+    apiClient.patch<StaffingRequirement>(`/shifts/staffing-requirements/${id}/`, data).then((r) => r.data),
+
+  delete: (id: number) => apiClient.delete(`/shifts/staffing-requirements/${id}/`),
 }

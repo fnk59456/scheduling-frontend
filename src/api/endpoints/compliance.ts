@@ -4,6 +4,7 @@ import type {
   ComplianceRuleKey,
   Holiday,
   HolidayCreateRequest,
+  HolidayCalendarResponse,
 } from '@/types/compliance'
 import type { PaginatedResponse } from '@/types/api'
 
@@ -26,4 +27,7 @@ export const holidaysApi = {
     apiClient.patch<Holiday>(`/compliance/holidays/${id}/`, data).then((r) => r.data),
 
   delete: (id: number) => apiClient.delete(`/compliance/holidays/${id}/`),
+
+  calendar: (start: string, end: string) =>
+    apiClient.get<HolidayCalendarResponse>('/compliance/holidays/calendar/', { params: { start, end } }).then((r) => r.data),
 }

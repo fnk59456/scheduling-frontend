@@ -65,3 +65,11 @@ export function useDeleteHoliday() {
     onError: () => toast({ title: '刪除失敗', variant: 'destructive' }),
   })
 }
+
+export function useHolidayCalendar(start: string, end: string, enabled = true) {
+  return useQuery({
+    queryKey: [...HOLIDAYS_KEY, 'calendar', start, end],
+    queryFn: () => holidaysApi.calendar(start, end),
+    enabled: enabled && !!start && !!end,
+  })
+}

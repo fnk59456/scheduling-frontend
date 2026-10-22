@@ -1,6 +1,6 @@
 import apiClient from '@/api/client'
 import type { PaginatedResponse } from '@/types/api'
-import type { Attendance, AnomalyRecord } from '@/types/attendance'
+import type { Attendance, AttendanceCreateRequest, AttendanceUpdateRequest, AnomalyRecord } from '@/types/attendance'
 import { fetchAllPages } from '@/api/pagination'
 
 export const attendanceApi = {
@@ -21,6 +21,14 @@ export const attendanceApi = {
 
   clockOut: () =>
     apiClient.post<Attendance>('/attendance/attendances/clock_out/', {}).then((r) => r.data),
+
+  create: (data: AttendanceCreateRequest) =>
+    apiClient.post<Attendance>('/attendance/attendances/', data).then((r) => r.data),
+
+  update: (id: number, data: AttendanceUpdateRequest) =>
+    apiClient.patch<Attendance>(`/attendance/attendances/${id}/`, data).then((r) => r.data),
+
+  delete: (id: number) => apiClient.delete(`/attendance/attendances/${id}/`),
 }
 
 export const anomalyApi = {

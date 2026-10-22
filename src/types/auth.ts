@@ -43,11 +43,33 @@ export interface UserProfile {
 }
 
 export interface LoginRequest {
-  username: string
+  username?: string
+  email?: string
   password: string
 }
 
 export interface LoginResponse {
   token: string
   user: UserProfile
+}
+
+export interface RegistrationCodeRequest {
+  email: string
+}
+
+export interface RegistrationCodeResponse {
+  message: string
+  email: string
+  expires_in_seconds: number
+  cooldown_seconds: number
+  debug_code?: string
+}
+
+export interface RegisterRequest {
+  email: string
+  code: string
+  password: string
+  first_name?: string
+  last_name?: string
+  phone?: string
 }

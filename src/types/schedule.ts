@@ -188,6 +188,19 @@ export interface CheckComplianceResult {
   total_count: number
   summary_by_rule: Record<string, number>
   violations: ComplianceViolation[]
+  coverage: StaffingCoverage[]
+  coverage_summary: { under: number; over: number; ok: number }
+}
+
+export interface StaffingCoverage {
+  date: string
+  shift_template_id: number | null
+  shift_name: string | null
+  required_min: number
+  required_max: number | null
+  assigned: number
+  status: 'ok' | 'under' | 'over'
+  source: 'rule' | 'template'
 }
 
 // ===== 派生 A (POST /schedules/versions/{B_id}/derive-legal/) =====

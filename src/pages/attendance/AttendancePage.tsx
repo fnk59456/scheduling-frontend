@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import {
   Clock, Loader2, RefreshCw, LogIn, LogOut, CheckCircle,
-  AlertTriangle, XCircle, Timer, Upload, Download,
+  AlertTriangle, XCircle, Timer, Upload, Download, Plus, Trash2,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -10,8 +10,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { useAttendances, useClockIn, useClockOut } from '@/hooks/useAttendance'
-import { toast } from '@/hooks/use-toast'
+import { useAttendances, useClockIn, useClockOut, useCreateAttendance, useUpdateAttendance, useDeleteAttendance } from '@/hooks/useAttendance'
+import { useEmployees } from '@/hooks/useEmployees'
+import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/lib/utils'
 import type { Attendance } from '@/types/attendance'
 
@@ -27,6 +28,13 @@ function fmtTime(s: string | null) {
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
   }
   return s.slice(0, 5)
+}
+
+function toDateTimeLocal(value: string | null) {
+  if (!value) return ''
+  const d = new Date(value)
+  const offset = d.getTimezoneOffset() * 60_000
+  return new Date(d.getTime() - offset).toISOString().slice(0, 16)
 }
 
 type StatusKey = 'normal' | 'late' | 'early' | 'absent' | 'overtime'
@@ -51,6 +59,16 @@ export default function AttendancePage() {
   const [dateTo, setDateTo] = useState(() => toDateInput(today))
   const [onlyAnomaly, setOnlyAnomaly] = useState(false)
   const [selected, setSelected] = useState<Attendance | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [employeeId, setEmployeeId] = useState('')
+  const [workDate, setWorkDate] = useState(() => toDateInput(today))
+  const [clockInAt, setClockInAt] = useState(() => `${toDateInput(today)}T08:00`)
+  const [clockOutAt, setClockOutAt] = useState(() => `${toDateInput(today)}T17:00`)
+  const [notes, setNotes] = useState('')
+  const [editClockIn, setEditClockIn] = useState('')
+  const [editClockOut, setEditClockOut] = useState('')
+  const [editNotes, setEditNotes] = useState('')
+  const canManage = useAuthStore((state) => state.hasRole(['admin', 'manager', 'supervisor']))
 
   const { data, isLoading, refetch, isFetching } = useAttendances({
     date_from: dateFrom,
@@ -60,9 +78,13 @@ export default function AttendancePage() {
 
   const clockIn = useClockIn()
   const clockOut = useClockOut()
+  const createAttendance = useCreateAttendance()
+  const updateAttendance = useUpdateAttendance()
+  const deleteAttendance = useDeleteAttendance()
+  const { data: employeesData } = useEmployees({ is_active: true }, { enabled: canManage, allPages: true })
 
   const records = data?.results ?? []
-  const busy = isLoading || isFetching || clockIn.isPending || clockOut.isPending
+  const busy = isLoading || isFetching || clockIn.isPending || clockOut.isPending || createAttendance.isPending || updateAttendance.isPending || deleteAttendance.isPending
 
   const normalCount = records.filter((r) => !r.anomaly_flag).length
   const anomalyCount = records.filter((r) => r.anomaly_flag).length
@@ -75,6 +97,11 @@ export default function AttendancePage() {
           <p className="text-muted-foreground mt-1">打卡紀錄與排班比對 · 異常自動標記</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {canManage ? (
+            <Button variant="outline" onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />代建出勤
+            </Button>
+          ) : null}
           <Button variant="outline">
             <Upload className="h-4 w-4 mr-2" />匯入打卡
           </Button>
@@ -178,7 +205,12 @@ export default function AttendancePage() {
                       <tr
                         key={r.id}
                         className="border-t hover:bg-muted/30 cursor-pointer"
-                        onClick={() => setSelected(r)}
+                        onClick={() => {
+                          setSelected(r)
+                          setEditClockIn(toDateTimeLocal(r.clock_in))
+                          setEditClockOut(toDateTimeLocal(r.clock_out))
+                          setEditNotes(r.notes || '')
+                        }}
                       >
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2.5">
@@ -253,20 +285,56 @@ export default function AttendancePage() {
                   <div className="text-amber-900/80 dark:text-amber-300 mt-1">{selected.anomaly_reason}</div>
                 </div>
               )}
-              <div className="space-y-1.5">
-                <Label>加註備註</Label>
-                <Input placeholder="例：因車禍事故遲到，已提供證明" />
-              </div>
+              {canManage ? (
+                <>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1.5"><Label>上班時間</Label><Input type="datetime-local" value={editClockIn} onChange={(e) => setEditClockIn(e.target.value)} /></div>
+                    <div className="space-y-1.5"><Label>下班時間</Label><Input type="datetime-local" value={editClockOut} onChange={(e) => setEditClockOut(e.target.value)} /></div>
+                  </div>
+                  <div className="space-y-1.5"><Label>備註</Label><Input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="例：客戶測試代建" /></div>
+                </>
+              ) : null}
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setSelected(null)}>取消</Button>
-              <Button onClick={() => {
+              {canManage ? <Button variant="destructive" className="mr-auto" disabled={busy} onClick={async () => {
+                if (!window.confirm('確定刪除這筆出勤紀錄？')) return
+                await deleteAttendance.mutateAsync(selected.id)
                 setSelected(null)
-                toast({ title: '已儲存', description: '出勤紀錄已更新' })
-              }}>儲存</Button>
+              }}><Trash2 className="mr-2 h-4 w-4" />刪除</Button> : null}
+              <Button variant="outline" onClick={() => setSelected(null)}>取消</Button>
+              {canManage ? <Button disabled={busy || !editClockIn || !editClockOut} onClick={async () => {
+                await updateAttendance.mutateAsync({ id: selected.id, data: { clock_in: new Date(editClockIn).toISOString(), clock_out: new Date(editClockOut).toISOString(), notes: editNotes } })
+                setSelected(null)
+              }}>儲存</Button> : null}
             </DialogFooter>
           </DialogContent>
         )}
+      </Dialog>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>管理者代建出勤</DialogTitle>
+            <DialogDescription>直接建立正式出勤紀錄，工時、遲到、早退與無排班出勤將由系統重算。此流程不含員工申請與簽核。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5"><Label>員工</Label><Select value={employeeId} onValueChange={setEmployeeId}><SelectTrigger><SelectValue placeholder="選擇員工" /></SelectTrigger><SelectContent>{employeesData?.results.map((employee) => <SelectItem key={employee.id} value={String(employee.id)}>{employee.user_name || employee.employee_id} · {employee.employee_id}</SelectItem>)}</SelectContent></Select></div>
+            <div className="space-y-1.5"><Label>出勤日</Label><Input type="date" value={workDate} onChange={(e) => setWorkDate(e.target.value)} /></div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-1.5"><Label>上班時間</Label><Input type="datetime-local" value={clockInAt} onChange={(e) => setClockInAt(e.target.value)} /></div>
+              <div className="space-y-1.5"><Label>下班時間</Label><Input type="datetime-local" value={clockOutAt} onChange={(e) => setClockOutAt(e.target.value)} /></div>
+            </div>
+            <div className="space-y-1.5"><Label>備註</Label><Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="代建原因或測試說明" /></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>取消</Button>
+            <Button disabled={busy || !employeeId || !workDate || !clockInAt || !clockOutAt} onClick={async () => {
+              await createAttendance.mutateAsync({ employee_id: Number(employeeId), work_date: workDate, clock_in: new Date(clockInAt).toISOString(), clock_out: new Date(clockOutAt).toISOString(), notes })
+              setCreateOpen(false)
+              setNotes('')
+            }}>建立出勤</Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
     </div>
   )

@@ -1,10 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { shiftTemplatesApi, shiftRulesApi } from '@/api/endpoints/shifts'
-import type { ShiftTemplateCreateRequest, ShiftRuleCreateRequest } from '@/types/shift'
+import { shiftTemplatesApi, shiftRulesApi, staffingRequirementsApi } from '@/api/endpoints/shifts'
+import type { StaffingRequirementCreateRequest, ShiftTemplateCreateRequest, ShiftRuleCreateRequest } from '@/types/shift'
 import { toast } from '@/hooks/use-toast'
 
 const TEMPLATES_KEY = ['shiftTemplates']
 const RULES_KEY = ['shiftRules']
+const STAFFING_KEY = ['staffingRequirements']
 
 export function useShiftTemplates(params?: { organization?: number; is_active?: boolean; search?: string }) {
   return useQuery({
@@ -99,5 +100,45 @@ export function useDeleteShiftRule() {
       toast({ title: '刪除成功', description: '排班規則已刪除' })
     },
     onError: () => toast({ title: '刪除失敗', description: '無法刪除排班規則', variant: 'destructive' }),
+  })
+}
+
+export function useStaffingRequirements() {
+  return useQuery({ queryKey: STAFFING_KEY, queryFn: () => staffingRequirementsApi.list() })
+}
+
+export function useCreateStaffingRequirement() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: StaffingRequirementCreateRequest) => staffingRequirementsApi.create(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: STAFFING_KEY })
+      toast({ title: '人力需求已新增' })
+    },
+    onError: () => toast({ title: '新增失敗', description: '請確認日期、星期與人數設定', variant: 'destructive' }),
+  })
+}
+
+export function useUpdateStaffingRequirement() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Partial<StaffingRequirementCreateRequest> }) => staffingRequirementsApi.update(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: STAFFING_KEY })
+      toast({ title: '人力需求已更新' })
+    },
+    onError: () => toast({ title: '更新失敗', variant: 'destructive' }),
+  })
+}
+
+export function useDeleteStaffingRequirement() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: staffingRequirementsApi.delete,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: STAFFING_KEY })
+      toast({ title: '人力需求已刪除' })
+    },
+    onError: () => toast({ title: '刪除失敗', variant: 'destructive' }),
   })
 }

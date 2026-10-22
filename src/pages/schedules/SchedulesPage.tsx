@@ -56,7 +56,7 @@ import { WeekDatePicker } from './WeekDatePicker'
 import type { EmployeeListItem } from '@/types/employee'
 import type { LeaveRequest } from '@/types/leave'
 import { approvedLeaveDateMap, approvedLeaveFor, workingSchedules } from '@/lib/leaveDates'
-import { useComplianceSettings } from '@/hooks/useCompliance'
+import { useComplianceSettings, useHolidayCalendar } from '@/hooks/useCompliance'
 import type { LLMScheduleResult } from '@/types/ai'
 
 function fmtDate(d: Date) {
@@ -341,6 +341,11 @@ export default function SchedulesPage() {
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart])
   const dateFrom = fmtDate(weekDays[0])
   const dateTo = fmtDate(weekDays[6])
+  const holidayCalendarQuery = useHolidayCalendar(dateFrom, dateTo, !!selectedVersion)
+  const holidayByDate = useMemo(
+    () => new Map((holidayCalendarQuery.data?.holidays ?? []).map((holiday) => [holiday.date, holiday])),
+    [holidayCalendarQuery.data?.holidays],
+  )
 
   const approvedLeavesQuery = useLeaveRequests(
     { status: 'approved', date_from: dateFrom, date_to: dateTo },
@@ -546,6 +551,14 @@ export default function SchedulesPage() {
     if (!complianceResult) return map
     for (const v of complianceResult.violations) {
       map.set(violationCellKey(v), v)
+    }
+    return map
+  }, [complianceResult])
+
+  const coverageByDate = useMemo(() => {
+    const map = new Map<string, NonNullable<CheckComplianceResult['coverage']>>()
+    for (const item of complianceResult?.coverage ?? []) {
+      map.set(item.date, [...(map.get(item.date) ?? []), item])
     }
     return map
   }, [complianceResult])
@@ -1368,13 +1381,35 @@ export default function SchedulesPage() {
                     {weekDays.map((d, idx) => {
                       const date = fmtDate(d)
                       const isClosedDay = weeklyClosedDays.has((d.getDay() + 6) % 7)
+                      const holiday = holidayByDate.get(date)
+                      const coverage = coverageByDate.get(date) ?? []
                       return (
-                      <th key={idx} className={cn('min-w-32 p-3 text-left', isClosedDay && 'bg-slate-100/80 dark:bg-slate-900/50')}>
+                      <th key={idx} className={cn(
+                        'min-w-36 p-3 text-left align-top',
+                        isClosedDay && 'bg-slate-100/80 dark:bg-slate-900/50',
+                        holiday?.kind === 'holiday' && 'bg-amber-50/80 dark:bg-amber-950/20',
+                        holiday?.kind === 'makeup' && 'bg-sky-50/80 dark:bg-sky-950/20',
+                      )}>
                         <div className="flex items-center justify-between">
                           <span className="font-semibold">週{weekdayLabels[idx]}</span>
                           <span className="text-xs text-muted-foreground">{date.slice(5)}</span>
                         </div>
                         {isClosedDay && <span className="mt-1 block text-[10px] font-medium text-slate-500">機構公休日</span>}
+                        {holiday && <span className={cn('mt-1 block text-[10px] font-medium', holiday.kind === 'holiday' ? 'text-amber-700' : 'text-sky-700')}>{holiday.name}{holiday.kind === 'makeup' ? '（補班日）' : ''}</span>}
+                        {coverage.length > 0 && (
+                          <div className="mt-2 space-y-1">
+                            {coverage.map((item) => (
+                              <div key={`${item.shift_template_id ?? 'all'}-${item.source}`} className={cn(
+                                'rounded border px-1.5 py-1 text-[10px] font-medium leading-tight',
+                                item.status === 'under' && 'border-rose-200 bg-rose-50 text-rose-700',
+                                item.status === 'over' && 'border-amber-200 bg-amber-50 text-amber-700',
+                                item.status === 'ok' && 'border-emerald-200 bg-emerald-50 text-emerald-700',
+                              )} title={`已排 ${item.assigned}／最少 ${item.required_min}${item.required_max === null ? '' : `／最多 ${item.required_max}`}`}>
+                                {item.shift_name || '全日'} {item.assigned}/{item.required_min}{item.status === 'under' ? ' 人力不足' : item.status === 'over' ? ' 超過上限' : ' 已達標'}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </th>
                     )})}
                   </tr>

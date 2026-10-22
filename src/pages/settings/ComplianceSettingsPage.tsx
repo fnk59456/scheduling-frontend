@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { CalendarOff, Loader2, Plus, Trash2 } from 'lucide-react'
+import { CalendarOff, Loader2, Plus, Trash2, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -13,8 +13,16 @@ import {
   useUpdateComplianceSettings,
 } from '@/hooks/useCompliance'
 import { cn } from '@/lib/utils'
+import type { ComplianceRuleKey } from '@/types/compliance'
 
 const weekdays = ['週一', '週二', '週三', '週四', '週五', '週六', '週日']
+const complianceRules: { key: ComplianceRuleKey; label: string }[] = [
+  { key: 'max_weekly_hours', label: '每週工時上限' },
+  { key: 'max_consecutive_days', label: '連續出勤天數' },
+  { key: 'min_rest_hours', label: '班間休息時數' },
+  { key: 'max_daily_hours', label: '每日工時上限' },
+  { key: 'weekly_rest_days', label: '每七日休息日' },
+]
 
 export default function ComplianceSettingsPage() {
   const organization = useAuthStore((state) => state.user?.organization)
@@ -40,6 +48,14 @@ export default function ComplianceSettingsPage() {
     updateSettings.mutate({ weekly_closed_days: [...next].sort((a, b) => a - b) })
   }
 
+  const toggleSoftRule = (rule: ComplianceRuleKey) => {
+    if (!settingsQuery.data) return
+    const next = new Set(settingsQuery.data.soft_rule_types)
+    if (next.has(rule)) next.delete(rule)
+    else next.add(rule)
+    updateSettings.mutate({ soft_rule_types: [...next] })
+  }
+
   const submitHoliday = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!organization || !holidayDate || !holidayName.trim()) return
@@ -54,6 +70,23 @@ export default function ComplianceSettingsPage() {
 
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5" />合規規則強度</CardTitle>
+          <CardDescription>點選規則可改為軟性提醒，未點選則為硬性違規。「每七日休息日」已可獨立設定。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {settingsQuery.isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : (
+            <div className="flex flex-wrap gap-2">
+              {complianceRules.map((rule) => {
+                const soft = settingsQuery.data?.soft_rule_types.includes(rule.key) ?? false
+                return <button key={rule.key} type="button" disabled={updateSettings.isPending} onClick={() => toggleSoftRule(rule.key)} className={cn('rounded-lg border px-3 py-2 text-sm transition-colors', soft ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-rose-200 bg-rose-50 text-rose-800')}><span className="mr-2 font-medium">{soft ? '軟性' : '硬性'}</span>{rule.label}</button>
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><CalendarOff className="h-5 w-5" />每週固定公休日</CardTitle>
