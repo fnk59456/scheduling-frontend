@@ -226,9 +226,13 @@ export function useLLMGenerateSchedule() {
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: SCHEDULES_KEY })
       qc.invalidateQueries({ queryKey: VERSIONS_KEY })
+      const staffingGapCount = result.warnings.filter((warning) =>
+        /只排到\s*\d+\/\d+\s*人/.test(warning),
+      ).length
       toast({
-        title: 'AI 排班完成',
-        description: `新增 ${result.created_count} 筆班次${result.rejected_count ? `，略過 ${result.rejected_count} 筆` : ''}`,
+        title: staffingGapCount > 0 ? 'AI 排班完成，但仍有人力缺口' : 'AI 排班完成',
+        description: `新增 ${result.created_count} 筆班次${result.rejected_count ? `，略過 ${result.rejected_count} 筆` : ''}${staffingGapCount > 0 ? `，尚有 ${staffingGapCount} 項最低人力未滿足` : ''}`,
+        variant: staffingGapCount > 0 ? 'destructive' : 'default',
       })
     },
     onError: (error) => {

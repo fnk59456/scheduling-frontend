@@ -498,6 +498,12 @@ export default function SchedulesPage() {
     }
     return warnings.sort((a, b) => rank(a) - rank(b))
   }, [llmResult])
+  const llmStaffingGapCount = useMemo(
+    () => (llmResult?.warnings ?? []).filter((warning) =>
+      /只排到\s*\d+\/\d+\s*人/.test(warning),
+    ).length,
+    [llmResult],
+  )
 
   // ===== 拖曳狀態 =====
   type DragSource = {
@@ -1278,10 +1284,40 @@ export default function SchedulesPage() {
           <CardContent className="py-4 flex items-center gap-3">
             <ShieldCheck className="h-5 w-5 text-emerald-600" />
             <div>
-              <p className="font-medium text-emerald-800">合規通過</p>
+              <p className="font-medium text-emerald-800">法規合規通過</p>
               {softViolations.length > 0 && (
                 <p className="text-sm text-emerald-700 mt-0.5">{softViolations.length} 筆軟性提醒（不影響合規判定）</p>
               )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {complianceResult && (
+        <Card className={complianceResult.coverage_summary.under > 0
+          ? 'border-rose-200 bg-rose-50/50'
+          : complianceResult.coverage_summary.over > 0
+            ? 'border-amber-200 bg-amber-50/50'
+            : 'border-emerald-200 bg-emerald-50/50'}>
+          <CardContent className="flex items-center gap-3 py-4">
+            {complianceResult.coverage_summary.under > 0
+              ? <AlertTriangle className="h-5 w-5 text-rose-600" />
+              : <CheckCircle className="h-5 w-5 text-emerald-600" />}
+            <div>
+              <p className={cn(
+                'font-medium',
+                complianceResult.coverage_summary.under > 0 ? 'text-rose-800' : 'text-emerald-800',
+              )}>
+                {complianceResult.coverage_summary.under > 0
+                  ? `人力覆蓋：${complianceResult.coverage_summary.under} 個班次人力不足`
+                  : '人力覆蓋達標'}
+              </p>
+              {complianceResult.coverage_summary.over > 0 && (
+                <p className="mt-0.5 text-sm text-amber-700">
+                  另有 {complianceResult.coverage_summary.over} 個班次超過設定上限
+                </p>
+              )}
+              <p className="mt-0.5 text-xs text-muted-foreground">人力覆蓋屬營運檢查，不影響法規合規判定。</p>
             </div>
           </CardContent>
         </Card>
@@ -1772,6 +1808,7 @@ export default function SchedulesPage() {
             <DialogTitle>AI 排班結果</DialogTitle>
             <DialogDescription>
               已新增 {llmResult?.created_count ?? 0} 筆班次，模型 {llmResult?.model ?? ''}。
+              {llmStaffingGapCount > 0 ? ` 尚有 ${llmStaffingGapCount} 項最低人力未滿足，請查看下方提醒。` : ''}
             </DialogDescription>
           </DialogHeader>
           {orderedLlmWarnings.length > 0 && (

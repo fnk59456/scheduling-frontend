@@ -207,13 +207,23 @@ export default function OrganizationsPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5"><Label>分店名稱</Label><Input value={branchForm.name} onChange={(e) => setBranchForm((p) => ({ ...p, name: e.target.value }))} required /></div>
-              <div className="space-y-1.5"><Label>分店代碼</Label><Input value={branchForm.code} onChange={(e) => setBranchForm((p) => ({ ...p, code: e.target.value }))} required /></div>
+              <div className="space-y-1.5">
+                <Label>分店代碼</Label>
+                <Input
+                  value={branchForm.code}
+                  onChange={(e) => setBranchForm((p) => ({ ...p, code: e.target.value }))}
+                  minLength={2}
+                  required
+                  placeholder="例如 B01"
+                />
+                <p className="text-xs text-muted-foreground">至少 2 個字元，同一機構內不可重複。</p>
+              </div>
             </div>
             <div className="space-y-1.5"><Label>電話</Label><Input value={branchForm.phone} onChange={(e) => setBranchForm((p) => ({ ...p, phone: e.target.value }))} /></div>
             <div className="space-y-1.5"><Label>地址</Label><Input value={branchForm.address} onChange={(e) => setBranchForm((p) => ({ ...p, address: e.target.value }))} /></div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setShowBranchDialog(false)}>取消</Button>
-              <Button type="submit" disabled={createBranch.isPending || updateBranch.isPending}>{editingBranchId ? '更新' : '建立'}</Button>
+              <Button type="submit" disabled={!branchForm.organization || branchForm.code.trim().length < 2 || createBranch.isPending || updateBranch.isPending}>{editingBranchId ? '更新' : '建立'}</Button>
             </DialogFooter>
           </form>
         </DialogContent>

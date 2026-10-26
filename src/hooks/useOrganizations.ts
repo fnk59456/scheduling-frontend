@@ -86,7 +86,11 @@ export function useCreateBranch() {
       qc.invalidateQueries({ queryKey: ORGS_KEY })
       toast({ title: '建立成功', description: '分店已成功建立' })
     },
-    onError: () => toast({ title: '建立失敗', description: '無法建立分店', variant: 'destructive' }),
+    onError: (error) => toast({
+      title: '建立失敗',
+      description: parseApiErrorMessage(error, '無法建立分店'),
+      variant: 'destructive',
+    }),
   })
 }
 
@@ -98,7 +102,11 @@ export function useUpdateBranch() {
       qc.invalidateQueries({ queryKey: BRANCHES_KEY })
       toast({ title: '更新成功', description: '分店資料已更新' })
     },
-    onError: () => toast({ title: '更新失敗', description: '無法更新分店', variant: 'destructive' }),
+    onError: (error) => toast({
+      title: '更新失敗',
+      description: parseApiErrorMessage(error, '無法更新分店'),
+      variant: 'destructive',
+    }),
   })
 }
 

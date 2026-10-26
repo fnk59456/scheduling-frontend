@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2, Pencil, Plus, Trash2, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { useAuthStore } from '@/stores/authStore'
-import { useBranches } from '@/hooks/useOrganizations'
+import { useBranches, useOrganizations } from '@/hooks/useOrganizations'
 import { useShiftTemplates, useStaffingRequirements, useCreateStaffingRequirement, useUpdateStaffingRequirement, useDeleteStaffingRequirement } from '@/hooks/useShifts'
 import type { StaffingRequirement } from '@/types/shift'
 
@@ -16,7 +16,9 @@ const weekdays = ['週一', '週二', '週三', '週四', '週五', '週六', '�
 type Scope = 'daily' | 'weekday' | 'date'
 
 export default function StaffingRequirementsPage() {
-  const organization = useAuthStore((state) => state.user?.organization)
+  const user = useAuthStore((state) => state.user)
+  const organization = user?.organization
+  const canSelectOrganization = !user?.role_name || user.role_name === 'admin'
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<StaffingRequirement | null>(null)
   const [scope, setScope] = useState<Scope>('daily')
@@ -27,28 +29,43 @@ export default function StaffingRequirementsPage() {
   const [minStaff, setMinStaff] = useState('1')
   const [maxStaff, setMaxStaff] = useState('')
   const [note, setNote] = useState('')
+  const [selectedOrganization, setSelectedOrganization] = useState(
+    organization ? String(organization) : '',
+  )
 
   const { data, isLoading } = useStaffingRequirements()
-  const { data: branchData } = useBranches(organization ? { organization } : undefined)
-  const { data: shiftData } = useShiftTemplates(organization ? { organization, is_active: true } : { is_active: true })
+  const { data: organizationsData } = useOrganizations()
+  const organizations = organizationsData?.results ?? []
+  const selectedOrganizationId = Number(selectedOrganization) || undefined
+  const effectiveOrganization = canSelectOrganization ? selectedOrganizationId : organization || undefined
+  const { data: branchData } = useBranches({ organization: effectiveOrganization ?? -1 })
+  const { data: shiftData } = useShiftTemplates({ organization: effectiveOrganization ?? -1, is_active: true })
   const createRequirement = useCreateStaffingRequirement()
   const updateRequirement = useUpdateStaffingRequirement()
   const deleteRequirement = useDeleteStaffingRequirement()
   const busy = createRequirement.isPending || updateRequirement.isPending || deleteRequirement.isPending
 
+  useEffect(() => {
+    if (!selectedOrganization && organizations.length > 0) {
+      setSelectedOrganization(String(organization ?? organizations[0].id))
+    }
+  }, [organization, organizations, selectedOrganization])
+
   const reset = () => {
     setEditing(null); setScope('daily'); setWeekday('0'); setDate(''); setBranch('all'); setShift('all'); setMinStaff('1'); setMaxStaff(''); setNote('')
+    setSelectedOrganization(String(organization ?? organizations[0]?.id ?? ''))
   }
   const startCreate = () => { reset(); setOpen(true) }
   const startEdit = (item: StaffingRequirement) => {
     setEditing(item)
+    setSelectedOrganization(String(item.organization))
     setScope(item.date ? 'date' : item.weekday !== null ? 'weekday' : 'daily')
     setWeekday(String(item.weekday ?? 0)); setDate(item.date || ''); setBranch(item.branch ? String(item.branch) : 'all'); setShift(item.shift_template ? String(item.shift_template) : 'all'); setMinStaff(String(item.min_staff)); setMaxStaff(item.max_staff === null ? '' : String(item.max_staff)); setNote(item.note || '')
     setOpen(true)
   }
   const submit = async () => {
     const payload = {
-      organization: organization || undefined,
+      organization: effectiveOrganization,
       branch: branch === 'all' ? null : Number(branch),
       shift_template: shift === 'all' ? null : Number(shift),
       weekday: scope === 'weekday' ? Number(weekday) : null,
@@ -88,6 +105,26 @@ export default function StaffingRequirementsPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>{editing ? '編輯' : '新增'}人力需求</DialogTitle><DialogDescription>較具體的特定日期規則會在對應日期使用。</DialogDescription></DialogHeader>
           <div className="space-y-4">
+            {canSelectOrganization ? (
+              <div className="space-y-1.5">
+                <Label>機構</Label>
+                <Select
+                  value={selectedOrganization}
+                  onValueChange={(value) => {
+                    setSelectedOrganization(value)
+                    setBranch('all')
+                    setShift('all')
+                  }}
+                >
+                  <SelectTrigger><SelectValue placeholder="選擇機構" /></SelectTrigger>
+                  <SelectContent>
+                    {organizations.map((item) => (
+                      <SelectItem key={item.id} value={String(item.id)}>{item.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
             <div className="space-y-1.5"><Label>適用日期</Label><Select value={scope} onValueChange={(value) => setScope(value as Scope)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="daily">每天</SelectItem><SelectItem value="weekday">每週固定日</SelectItem><SelectItem value="date">特定日期</SelectItem></SelectContent></Select></div>
             {scope === 'weekday' ? <div className="space-y-1.5"><Label>星期</Label><Select value={weekday} onValueChange={setWeekday}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{weekdays.map((label, index) => <SelectItem key={label} value={String(index)}>{label}</SelectItem>)}</SelectContent></Select></div> : null}
             {scope === 'date' ? <div className="space-y-1.5"><Label>日期</Label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div> : null}
@@ -98,7 +135,7 @@ export default function StaffingRequirementsPage() {
             <div className="grid gap-3 md:grid-cols-2"><div className="space-y-1.5"><Label>最少人數</Label><Input type="number" min={0} value={minStaff} onChange={(e) => setMinStaff(e.target.value)} /></div><div className="space-y-1.5"><Label>最多人數（選填）</Label><Input type="number" min={0} value={maxStaff} onChange={(e) => setMaxStaff(e.target.value)} /></div></div>
             <div className="space-y-1.5"><Label>備註</Label><Input value={note} onChange={(e) => setNote(e.target.value)} /></div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>取消</Button><Button disabled={busy || !minStaff || (scope === 'date' && !date) || (maxStaff !== '' && Number(maxStaff) < Number(minStaff))} onClick={submit}>{busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}儲存</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>取消</Button><Button disabled={busy || !effectiveOrganization || !minStaff || (scope === 'date' && !date) || (maxStaff !== '' && Number(maxStaff) < Number(minStaff))} onClick={submit}>{busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}儲存</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </Card>
