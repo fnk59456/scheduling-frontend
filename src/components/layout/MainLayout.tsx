@@ -1,4 +1,5 @@
-import { type ReactNode } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { TopNav } from './TopNav'
 
@@ -7,18 +8,45 @@ interface MainLayoutProps {
 }
 
 export function MainLayout({ children }: MainLayoutProps) {
+  const location = useLocation()
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+
+  useEffect(() => {
+    setIsMobileMenuOpen(false)
+  }, [location.pathname])
+
+  useEffect(() => {
+    if (!isMobileMenuOpen) return
+    const originalOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = originalOverflow
+    }
+  }, [isMobileMenuOpen])
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-background via-background to-muted/30 flex flex-col">
-      <TopNav />
+      <TopNav
+        isMobileMenuOpen={isMobileMenuOpen}
+        onMobileMenuToggle={() => setIsMobileMenuOpen((open) => !open)}
+      />
       <div className="flex flex-1 overflow-hidden">
         <div className="hidden md:block w-64 fixed left-0 top-16 h-[calc(100vh-4rem)] z-30">
           <Sidebar />
         </div>
 
-        <div id="mobile-sidebar" className="fixed inset-0 z-40 hidden md:hidden">
-          <div className="absolute inset-0 bg-black/50" />
-          <div className="absolute left-0 top-0 bottom-0 w-64 bg-background shadow-xl">
-            <Sidebar />
+        <div
+          className={isMobileMenuOpen ? 'fixed inset-0 z-40 md:hidden' : 'hidden'}
+          aria-hidden={!isMobileMenuOpen}
+        >
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setIsMobileMenuOpen(false)}
+            aria-label="關閉導覽選單"
+          />
+          <div className="absolute bottom-0 left-0 top-0 w-72 max-w-[85vw] bg-background shadow-xl">
+            <Sidebar onNavigate={() => setIsMobileMenuOpen(false)} />
           </div>
         </div>
 

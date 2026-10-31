@@ -1458,11 +1458,15 @@ export default function SchedulesPage() {
           ) : employees.length === 0 ? (
             <div className="py-16 text-center text-muted-foreground">沒有可排班的在職員工</div>
           ) : (
+            <>
+            <p className="mb-2 text-xs text-muted-foreground md:hidden">
+              ↔ 左右滑動查看完整一週；員工欄固定在左側。手機請點選格子指派班次。
+            </p>
             <div className="overflow-auto rounded-lg border">
               <table className="min-w-[980px] w-full text-sm">
                 <thead className="sticky top-0 bg-background/95 backdrop-blur border-b">
                   <tr>
-                    <th className="text-left p-3 w-56">員工</th>
+                    <th className="sticky left-0 z-30 w-56 bg-background p-3 text-left">員工</th>
                     {weekDays.map((d, idx) => {
                       const date = fmtDate(d)
                       const isClosedDay = weeklyClosedDays.has((d.getDay() + 6) % 7)
@@ -1502,7 +1506,7 @@ export default function SchedulesPage() {
                 <tbody>
                   {employees.map((e) => (
                     <tr key={e.id} className="border-b last:border-b-0 hover:bg-muted/20">
-                      <td className="relative p-3 pr-10 align-top">
+                      <td className="sticky left-0 z-20 bg-background p-3 pr-10 align-top">
                         <div className="flex items-center gap-2">
                           <div className="h-7 w-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-semibold shrink-0">
                             {(e.user_name || e.user.first_name || e.user.username).slice(0, 1)}
@@ -1692,6 +1696,7 @@ export default function SchedulesPage() {
                 </tbody>
               </table>
             </div>
+            </>
           )}
           {templates.length > 0 && (
             <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">

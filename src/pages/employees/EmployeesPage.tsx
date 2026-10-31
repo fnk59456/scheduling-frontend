@@ -185,6 +185,7 @@ export default function EmployeesPage() {
             searchPlaceholder="搜尋員工姓名、編號、Email..."
             searchKeys={['user_name', 'user_email', 'user.username', 'employee_id', 'position']}
             emptyMessage="沒有符合條件的員工"
+            mobileScrollHint="左右滑動查看完整員工資料；員工編號會固定在左側"
             onRowClick={(row) => navigate(`/employees/${row.id}`)}
           />
         </CardContent>

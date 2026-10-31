@@ -101,7 +101,7 @@ const navigationSections: { title: string; items: NavItem[] }[] = [
   },
 ]
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const location = useLocation()
   const pathname = location.pathname
   const hasRole = useAuthStore((s) => s.hasRole)
@@ -110,7 +110,7 @@ export function Sidebar() {
   const pendingLeaveCount = isSupervisor ? pendingLeaves.data?.count ?? 0 : 0
 
   return (
-    <div className="hidden border-r bg-background/80 backdrop-blur-sm md:block w-64 shadow-sm h-full">
+    <div className="h-full w-full border-r bg-background/95 shadow-sm backdrop-blur-sm">
       <div className="flex h-full flex-col">
         <div className="flex-1 overflow-auto py-3 px-3">
           <div className="space-y-0.5">
@@ -121,6 +121,7 @@ export function Sidebar() {
                 items={section.items.filter((item) => !item.roles || hasRole(item.roles))}
                 pathname={pathname}
                 pendingLeaveCount={pendingLeaveCount}
+                onNavigate={onNavigate}
               />
             ))}
           </div>
@@ -140,11 +141,12 @@ export function Sidebar() {
   )
 }
 
-function SidebarSection({ title, items, pathname, pendingLeaveCount }: {
+function SidebarSection({ title, items, pathname, pendingLeaveCount, onNavigate }: {
   title: string
   items: NavItem[]
   pathname: string
   pendingLeaveCount: number
+  onNavigate?: () => void
 }) {
   if (items.length === 0) return null
 
@@ -158,6 +160,7 @@ function SidebarSection({ title, items, pathname, pendingLeaveCount }: {
             <Link
               key={item.href}
               to={item.href}
+              onClick={onNavigate}
               className={cn(
                 'flex w-full items-center text-left gap-3 rounded-lg px-2.5 py-2 transition-all group relative',
                 active

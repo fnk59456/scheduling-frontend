@@ -91,12 +91,13 @@ export default function OvertimePage() {
       </div>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-3 pb-3">
-          <CardTitle>加班紀錄</CardTitle>
-          <div className="flex items-center gap-2">
+        <CardHeader className="flex flex-col items-stretch gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle className="whitespace-nowrap">加班紀錄</CardTitle>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
             {canAdjust && (
               <Button
                 variant="outline"
+                className="w-full sm:w-auto"
                 onClick={() => {
                   setSelectedAttendanceId('')
                   setShowCalculateDialog(true)
@@ -105,7 +106,7 @@ export default function OvertimePage() {
                 <Calculator className="mr-2 h-4 w-4" />從出勤計算
               </Button>
             )}
-            <Input type="month" value={month} onChange={(event) => setMonth(event.target.value)} className="w-40" />
+            <Input type="month" value={month} onChange={(event) => setMonth(event.target.value)} className="w-full sm:w-40" />
           </div>
         </CardHeader>
         <CardContent className="p-0">

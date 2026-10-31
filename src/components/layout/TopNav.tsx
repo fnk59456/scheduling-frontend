@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Bell, Moon, Sun, Menu, User, LogOut, X } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { Button } from '@/components/ui/button'
@@ -21,23 +20,14 @@ const roleLabels: Record<RoleName, string> = {
   employee: '員工',
 }
 
-export function TopNav() {
+interface TopNavProps {
+  isMobileMenuOpen: boolean
+  onMobileMenuToggle: () => void
+}
+
+export function TopNav({ isMobileMenuOpen, onMobileMenuToggle }: TopNavProps) {
   const { setTheme } = useTheme()
   const { user, logout } = useAuth()
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
-
-  const toggleMobileMenu = () => {
-    setIsMobileMenuOpen(!isMobileMenuOpen)
-    const mobileMenu = document.getElementById('mobile-sidebar')
-    if (mobileMenu) {
-      if (isMobileMenuOpen) {
-        mobileMenu.classList.add('hidden')
-      } else {
-        mobileMenu.classList.remove('hidden')
-      }
-    }
-  }
-
   const userInitial = user?.first_name?.[0] || user?.username?.[0]?.toUpperCase() || 'U'
   const roleLabel = (user?.role_name ? roleLabels[user.role_name as RoleName] : null) || user?.role_name || '員工'
 
@@ -45,7 +35,14 @@ export function TopNav() {
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 shadow-sm">
       <div className="flex h-16 items-center justify-between px-4 md:px-6">
         <div className="flex items-center gap-2 md:gap-4">
-          <Button variant="ghost" size="icon" className="md:hidden" onClick={toggleMobileMenu}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="md:hidden"
+            onClick={onMobileMenuToggle}
+            aria-label={isMobileMenuOpen ? '關閉導覽選單' : '開啟導覽選單'}
+            aria-expanded={isMobileMenuOpen}
+          >
             {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
           <a href="/" className="flex items-center gap-2.5">

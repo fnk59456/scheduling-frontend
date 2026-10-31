@@ -22,6 +22,7 @@ interface DataTableProps<T> {
   emptyMessage?: string
   onRowClick?: (row: T) => void
   actions?: React.ReactNode
+  mobileScrollHint?: string | false
 }
 
 type SortDir = 'asc' | 'desc' | null
@@ -45,6 +46,7 @@ export function DataTable<T extends { id?: number }>({
   emptyMessage = '沒有資料',
   onRowClick,
   actions,
+  mobileScrollHint = false,
 }: DataTableProps<T>) {
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState<string | null>(null)
@@ -111,13 +113,20 @@ export function DataTable<T extends { id?: number }>({
         {actions && <div className="flex gap-2 ml-auto">{actions}</div>}
       </div>
 
+      {mobileScrollHint && (
+        <p className="text-xs text-muted-foreground sm:hidden">↔ {mobileScrollHint}</p>
+      )}
       <div className="rounded-md border overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-max text-sm">
             <thead>
               <tr className="border-b bg-muted/50">
-                {columns.map((col) => (
-                  <th key={col.key} className={cn("px-4 py-3 text-left font-medium text-muted-foreground", col.className)}>
+                {columns.map((col, columnIndex) => (
+                  <th key={col.key} className={cn(
+                    'px-4 py-3 text-left font-medium text-muted-foreground',
+                    columnIndex === 0 && 'sticky left-0 z-20 bg-muted',
+                    col.className,
+                  )}>
                     {col.sortable ? (
                       <button className="flex items-center gap-1 hover:text-foreground transition-colors" onClick={() => handleSort(col.key)}>
                         {col.title}
@@ -144,8 +153,12 @@ export function DataTable<T extends { id?: number }>({
                     className={cn("border-b transition-colors hover:bg-muted/50", onRowClick && "cursor-pointer")}
                     onClick={() => onRowClick?.(row)}
                   >
-                    {columns.map((col) => (
-                      <td key={col.key} className={cn("px-4 py-3", col.className)}>
+                    {columns.map((col, columnIndex) => (
+                      <td key={col.key} className={cn(
+                        'px-4 py-3',
+                        columnIndex === 0 && 'sticky left-0 z-10 bg-background',
+                        col.className,
+                      )}>
                         {col.render ? col.render(row) : String(getNestedValue(row, col.key) ?? '')}
                       </td>
                     ))}
