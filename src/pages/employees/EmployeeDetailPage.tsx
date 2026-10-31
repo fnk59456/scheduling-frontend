@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Switch } from '@/components/ui/switch'
 import {
   useAddContract, useAddCertification, useAddEmployeeTimeSlot, useCertifications,
   useEmployee, useEmployeeAvailability, useRemoveCertification,
@@ -19,12 +20,18 @@ import {
 } from '@/hooks/useEmployees'
 import { EmployeeFormDialog } from './EmployeeFormDialog'
 import { cn } from '@/lib/utils'
-import type { Certification, ContractType, SlotType } from '@/types/employee'
+import type { Certification, ContractType, HolidayWorkPreference, SlotType } from '@/types/employee'
 
 const contractTypeLabels: Record<string, string> = { full_time: '全職', part_time: '兼職', dispatch: '派遣' }
 
 const DAY_LABELS = ['週一', '週二', '週三', '週四', '週五', '週六', '週日']
 const EVERY_DAY_VALUE = '__every_day__'
+const HOLIDAY_WORK_OPTIONS: Array<{ value: HolidayWorkPreference; label: string; description: string }> = [
+  { value: 'forbid', label: '不可排', description: 'AI 絕不排，手動排班會被阻擋。' },
+  { value: 'allow', label: '可排（預設）', description: '有排班需求時可以安排。' },
+  { value: 'prefer', label: '偏好排假日班', description: '假日需要人力時優先安排。' },
+  { value: 'avoid', label: '不優先', description: '盡量不排，但人力不足時仍可安排。' },
+]
 
 export default function EmployeeDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -54,11 +61,15 @@ export default function EmployeeDetailPage() {
   const [slotForm, setSlotForm] = useState({ slot_type: 'blocked' as SlotType, day: EVERY_DAY_VALUE, start: '', end: '', label: '' })
   const [availHours, setAvailHours] = useState('')
   const [availRules, setAvailRules] = useState('')
+  const [restDayWorkOk, setRestDayWorkOk] = useState(false)
+  const [holidayWork, setHolidayWork] = useState<HolidayWorkPreference>('allow')
 
   useEffect(() => {
     if (availabilityQuery.isLoading || !employee) return
     setAvailHours(availabilityQuery.data?.required_hours_per_week ?? employee.agreed_hours_per_week ?? '')
     setAvailRules(availabilityQuery.data?.special_rules ?? '')
+    setRestDayWorkOk(availabilityQuery.data?.rest_day_work_ok ?? employee.scheduling_prefs?.rest_day_work_ok ?? false)
+    setHolidayWork(availabilityQuery.data?.holiday_work ?? employee.scheduling_prefs?.holiday_work ?? 'allow')
   }, [availabilityQuery.data, availabilityQuery.isLoading, employee])
 
   if (isLoading) {
@@ -115,6 +126,8 @@ export default function EmployeeDetailPage() {
       data: {
         required_hours_per_week: availHours.trim() ? Number(availHours) : null,
         special_rules: availRules,
+        rest_day_work_ok: restDayWorkOk,
+        holiday_work: holidayWork,
         effective_from: null,
         effective_to: null,
       },
@@ -273,6 +286,58 @@ export default function EmployeeDetailPage() {
               </Button>
             </CardHeader>
             <CardContent className="space-y-5">
+              <section className="space-y-5 rounded-lg border bg-muted/15 p-4">
+                <div>
+                  <h3 className="font-medium">排班意願</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">供 AI 排班、手動指派與合規提示使用。</p>
+                </div>
+
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <Label htmlFor="rest-day-work" className="text-sm font-medium">休息日出勤</Label>
+                    <p className="mt-1 text-sm text-muted-foreground">願意在人力不足時上「休息日」（每週第 6 天，需加班費）</p>
+                    <p className="mt-1 text-xs text-muted-foreground">例假（每週 1 天）依法不可出勤，此選項不影響例假。</p>
+                  </div>
+                  <Switch
+                    id="rest-day-work"
+                    checked={restDayWorkOk}
+                    onCheckedChange={setRestDayWorkOk}
+                    aria-label="願意在休息日出勤"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">國定假日排班</Label>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {HOLIDAY_WORK_OPTIONS.map((option) => (
+                      <label
+                        key={option.value}
+                        className={cn(
+                          'flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors',
+                          holidayWork === option.value ? 'border-primary bg-primary/5' : 'hover:bg-muted/40',
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name="holiday-work"
+                          value={option.value}
+                          checked={holidayWork === option.value}
+                          onChange={() => setHolidayWork(option.value)}
+                          className="mt-1 h-4 w-4 accent-primary"
+                        />
+                        <span>
+                          <span className="block text-sm font-medium">{option.label}</span>
+                          <span className="mt-0.5 block text-xs text-muted-foreground">{option.description}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  {employee.pay_type === 'hourly' && (
+                    <p className="text-xs text-muted-foreground">時薪制假日出勤直接加倍計薪，不套用補休配額。</p>
+                  )}
+                </div>
+              </section>
+
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label>每週要求工時</Label>

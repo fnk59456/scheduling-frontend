@@ -12,7 +12,7 @@ import type {
 import { toast } from '@/hooks/use-toast'
 import axios from 'axios'
 import { aiApi } from '@/api/endpoints/ai'
-import type { LLMScheduleRequest } from '@/types/ai'
+import type { AIRestQuotaRequest, LLMScheduleRequest } from '@/types/ai'
 
 const VERSIONS_KEY = ['scheduleVersions']
 const SCHEDULES_KEY = ['schedules']
@@ -248,6 +248,15 @@ export function useLLMGenerateSchedule() {
               : '無法完成 AI 排班'
       toast({ title: 'AI 排班失敗', description: parseApiErrorMessage(error, fallback), variant: 'destructive' })
     },
+  })
+}
+
+export function useRestQuota(params: AIRestQuotaRequest | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ['aiRestQuota', params],
+    queryFn: () => aiApi.restQuota(params!),
+    enabled: enabled && !!params?.period_start && !!params?.period_end,
+    staleTime: 30_000,
   })
 }
 

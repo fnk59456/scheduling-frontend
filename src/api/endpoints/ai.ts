@@ -10,6 +10,8 @@ import type {
   AIChangeImpact,
   LLMScheduleRequest,
   LLMScheduleResult,
+  AIRestQuotaRequest,
+  AIRestQuotaResult,
 } from '@/types/ai'
 
 /**
@@ -21,6 +23,12 @@ import type {
  * - /ai/schedule/generate/ 會自動從 DB 載入員工 availability，前端不需再手動傳入
  */
 export const aiApi = {
+  /** 免費試算指定期間的週休、國定假日與月薪制員工上班日上限。 */
+  restQuota: (params: AIRestQuotaRequest) =>
+    apiClient
+      .get<AIRestQuotaResult>('/ai/schedule/rest-quota/', { params })
+      .then((r) => r.data),
+
   /** 免費 LLM 直接產生並寫入指定草稿版本。 */
   llmGenerate: (data: LLMScheduleRequest) =>
     apiClient

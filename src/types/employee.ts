@@ -9,6 +9,12 @@ export interface Certification {
 
 export type ContractType = 'full_time' | 'part_time' | 'dispatch'
 export type PayType = 'monthly' | 'hourly'
+export type HolidayWorkPreference = 'forbid' | 'allow' | 'prefer' | 'avoid'
+
+export interface SchedulingPreferences {
+  rest_day_work_ok: boolean
+  holiday_work: HolidayWorkPreference
+}
 
 export interface Contract {
   id: number
@@ -51,6 +57,7 @@ export interface Employee {
   contracts: Contract[]
   hire_date: string
   is_active: boolean
+  scheduling_prefs: SchedulingPreferences
   created_at: string
   updated_at: string
 }
@@ -72,6 +79,7 @@ export interface EmployeeListItem {
   certification_count: number
   hire_date: string
   is_active: boolean
+  scheduling_prefs: SchedulingPreferences
 }
 
 export interface EmployeeCreateRequest {
@@ -166,6 +174,9 @@ export interface EmployeeAvailability {
   // 後端以 Decimal 序列化，回傳為字串 (例："32.00")；null = 沿用合約設定
   required_hours_per_week: string | null
   special_rules: string
+  rest_day_work_ok: boolean
+  holiday_work: HolidayWorkPreference
+  holiday_work_display: string
   effective_from: string | null
   effective_to: string | null
   time_slots: EmployeeTimeSlot[]
@@ -185,6 +196,8 @@ export interface EmployeeTimeSlotInput {
 export interface EmployeeAvailabilityUpdateRequest {
   required_hours_per_week?: number | string | null
   special_rules?: string
+  rest_day_work_ok?: boolean
+  holiday_work?: HolidayWorkPreference
   effective_from?: string | null
   effective_to?: string | null
   time_slots?: EmployeeTimeSlotInput[]

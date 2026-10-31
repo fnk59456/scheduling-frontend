@@ -69,7 +69,21 @@ export default function EmployeesPage() {
               {name.slice(0, 1)}
             </div>
             <div>
-              <p className="font-medium">{name}</p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <p className="font-medium">{name}</p>
+                {row.scheduling_prefs?.rest_day_work_ok && (
+                  <Badge variant="outline" className="border-blue-300 text-blue-700">可上第 6 天</Badge>
+                )}
+                {row.scheduling_prefs?.holiday_work === 'forbid' && (
+                  <Badge variant="outline" className="border-rose-300 text-rose-700">假日不排</Badge>
+                )}
+                {row.scheduling_prefs?.holiday_work === 'prefer' && (
+                  <Badge variant="outline" className="border-emerald-300 text-emerald-700">偏好假日</Badge>
+                )}
+                {row.scheduling_prefs?.holiday_work === 'avoid' && (
+                  <Badge variant="outline" className="border-slate-300 text-slate-600">假日不優先</Badge>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">{row.user_email || row.user.email}</p>
             </div>
           </div>

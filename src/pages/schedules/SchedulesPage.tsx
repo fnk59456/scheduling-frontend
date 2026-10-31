@@ -30,6 +30,7 @@ import {
   useCheckCompliance,
   useUpdateScheduleVersion,
   useLLMGenerateSchedule,
+  useRestQuota,
 } from '@/hooks/useSchedules'
 import type {
   Schedule,
@@ -579,6 +580,57 @@ export default function SchedulesPage() {
       : llmRangeDays > 62
         ? '單次 AI 排班最多 62 天'
         : null
+  const restQuotaQuery = useRestQuota(
+    llmPeriodStart && llmPeriodEnd && selectedVersion
+      ? {
+        period_start: llmPeriodStart,
+        period_end: llmPeriodEnd,
+        organization_id: selectedVersion.organization,
+        branch_id: selectedVersion.branch ?? undefined,
+      }
+      : undefined,
+    showLLMScheduleDialog && !llmRangeError,
+  )
+
+  const employeeDisplayName = (employeeId: number) => {
+    const employee = employees.find((item) => item.id === employeeId)
+    return employee?.user_name || employee?.employee_id || `員工 #${employeeId}`
+  }
+
+  const holidayPreferenceLabel = (value: unknown) => {
+    if (value === 'forbid') return '不可排'
+    if (value === 'prefer') return '偏好排假日班'
+    if (value === 'avoid') return '不優先'
+    return '可排'
+  }
+
+  const holidayAssignmentBlocked = (employeeId: number, date: string) => {
+    const holiday = holidayByDate.get(date)
+    const employee = employees.find((item) => item.id === employeeId)
+    if (!holiday || employee?.scheduling_prefs?.holiday_work !== 'forbid') return false
+    toast({
+      title: '不可指派國定假日班',
+      description: `${employeeDisplayName(employeeId)} 設定不可排國定假日（${holiday.name}）。`,
+      variant: 'destructive',
+    })
+    return true
+  }
+
+  const complianceMessage = (violation: ComplianceViolation) => {
+    const employee = employees.find((item) => item.id === violation.employee_pk)
+    if (violation.rule === 'weekly_rest_days') {
+      return employee?.scheduling_prefs?.rest_day_work_ok
+        ? '休息日出勤（員工已同意），需加班費'
+        : '休息日出勤（員工未同意），需取得同意並給加班費'
+    }
+    if (violation.rule === 'holiday_work_refused') {
+      return `${String(violation.detail.holiday_name ?? '國定假日')}：員工設定不可排國定假日`
+    }
+    if (violation.rule === 'holiday_scheduling') {
+      return `國定假日出勤（該員工：${holidayPreferenceLabel(violation.detail.holiday_work)}）— 工資應加倍／補休`
+    }
+    return violation.rule_label
+  }
 
   const setLLMPeriod = (start: Date, end: Date) => {
     setLlmPeriodStart(fmtDate(start))
@@ -663,6 +715,7 @@ export default function SchedulesPage() {
   const performDrop = async (src: DragSource, targetEmployeeId: number, targetDate: string) => {
     if (!selectedVersion) return
     if (src.employeeId === targetEmployeeId && src.date === targetDate) return
+    if (holidayAssignmentBlocked(targetEmployeeId, targetDate)) return
 
     const srcBase = {
       shift_template: src.shiftTemplateId,
@@ -852,6 +905,7 @@ export default function SchedulesPage() {
       toast({ title: '資料不完整', description: '請選擇員工、日期與班別', variant: 'destructive' })
       return
     }
+    if (scheduleForm.status !== 'leave' && holidayAssignmentBlocked(Number(scheduleForm.employee), scheduleForm.schedule_date)) return
     const tpl = templates.find((t) => String(t.id) === scheduleForm.shift_template)
     const payloadBase: ScheduleCreateRequest = {
       schedule_version: selectedVersion.id,
@@ -1352,12 +1406,7 @@ export default function SchedulesPage() {
                   <div>
                     <span className="font-medium">{v.employee_name}</span>
                     <span className="text-muted-foreground"> · {v.schedule_date}</span>
-                    <span className="text-muted-foreground"> · {v.rule_label}</span>
-                    {v.detail && Object.keys(v.detail).length > 0 && (
-                      <span className="text-muted-foreground text-xs ml-2">
-                        ({Object.entries(v.detail).map(([k, val]) => `${k}: ${val}`).join(', ')})
-                      </span>
-                    )}
+                    <span className="text-muted-foreground"> · {complianceMessage(v)}</span>
                   </div>
                   <Badge variant="outline" className={cn(
                     'ml-auto shrink-0',
@@ -1431,7 +1480,7 @@ export default function SchedulesPage() {
                           <span className="text-xs text-muted-foreground">{date.slice(5)}</span>
                         </div>
                         {isClosedDay && <span className="mt-1 block text-[10px] font-medium text-slate-500">機構公休日</span>}
-                        {holiday && <span className={cn('mt-1 block text-[10px] font-medium', holiday.kind === 'holiday' ? 'text-amber-700' : 'text-sky-700')}>{holiday.name}{holiday.kind === 'makeup' ? '（補班日）' : ''}</span>}
+                        {holiday && <span className={cn('mt-1 block text-[10px] font-medium', holiday.kind === 'holiday' ? 'text-amber-700' : 'text-sky-700')}>{holiday.name}{holiday.kind === 'makeup' ? '（補假日）' : ''}</span>}
                         {coverage.length > 0 && (
                           <div className="mt-2 space-y-1">
                             {coverage.map((item) => (
@@ -1532,7 +1581,7 @@ export default function SchedulesPage() {
                                       const otherVersion = timelineVersions.find((version) => version.id === other.schedule_version)
                                       return `跨版本重疊：${otherVersion?.version_label ?? `#${other.schedule_version}`} · ${other.shift_template.name}`
                                     }),
-                                    ...(violation ? [`${violation.rule_label}：${JSON.stringify(violation.detail)}`] : []),
+                                    ...(violation ? [complianceMessage(violation)] : []),
                                   ].join('\n')
                                   return (
                                     <div
@@ -1625,7 +1674,12 @@ export default function SchedulesPage() {
                                 {isDragTarget
                                   ? <span className="font-medium text-primary">放置於此</span>
                                   : canEditSelectedVersion
-                                    ? <><Plus className="h-3 w-3 inline mr-0.5" />指派</>
+                                    ? <>
+                                      <Plus className="h-3 w-3 inline mr-0.5" />指派
+                                      {holidayByDate.has(date) && e.scheduling_prefs?.holiday_work === 'prefer' && (
+                                        <span className="ml-1 text-emerald-600" title="此員工偏好排假日班">★ 偏好</span>
+                                      )}
+                                    </>
                                     : <span>已簽核鎖定</span>
                                 }
                               </button>
@@ -1690,7 +1744,7 @@ export default function SchedulesPage() {
         open={showLLMScheduleDialog}
         onOpenChange={(open) => !llmGenerate.isPending && setShowLLMScheduleDialog(open)}
       >
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>AI 排班區間</DialogTitle>
             <DialogDescription>
@@ -1769,6 +1823,61 @@ export default function SchedulesPage() {
               {llmRangeError ?? `共 ${llmRangeDays} 天`}
             </div>
 
+            {!llmRangeError && (
+              <section className="rounded-lg border border-blue-200 bg-blue-50/60 p-4 text-sm dark:border-blue-900 dark:bg-blue-950/20">
+                {restQuotaQuery.isLoading ? (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />試算排休配額
+                  </div>
+                ) : restQuotaQuery.isError ? (
+                  <p className="text-destructive">無法取得排休試算，請確認期間後重試。</p>
+                ) : restQuotaQuery.data ? (
+                  <div className="space-y-3">
+                    <div>
+                      <p className="font-medium text-blue-900 dark:text-blue-100">
+                        {llmPeriodStart.slice(5).replace('-', '/')} – {llmPeriodEnd.slice(5).replace('-', '/')} 共 {restQuotaQuery.data.period_days} 天
+                        {' ｜ '}週休 {restQuotaQuery.data.weekly_rest_days} 天
+                        {restQuotaQuery.data.holiday_days > 0 && ` ＋ 國定假日 ${restQuotaQuery.data.holiday_days} 天`}
+                      </p>
+                      {restQuotaQuery.data.holidays.length > 0 && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {restQuotaQuery.data.holidays.map((holiday) => `${holiday.name}${holiday.kind === 'makeup' ? '（補假日）' : ''}`).join('、')}
+                        </p>
+                      )}
+                      <p className="mt-2 font-medium">月薪制員工最多上 {restQuotaQuery.data.work_days_max} 天</p>
+                    </div>
+                    <details>
+                      <summary className="cursor-pointer font-medium text-primary">查看每人配額</summary>
+                      <div className="mt-2 overflow-x-auto rounded-md border bg-background">
+                        <table className="w-full min-w-[560px] text-xs">
+                          <thead className="border-b bg-muted/50 text-left">
+                            <tr>
+                              <th className="p-2">員工</th>
+                              <th className="p-2">薪制</th>
+                              <th className="p-2">最多上班</th>
+                              <th className="p-2">休息日</th>
+                              <th className="p-2">假日意願</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {restQuotaQuery.data.employees.map((employee) => (
+                              <tr key={employee.employee_id} className="border-b last:border-0">
+                                <td className="p-2 font-medium">{employee.name || employee.employee_code}</td>
+                                <td className="p-2">{employee.pay_type === 'monthly' ? '月薪制' : '時薪制'}</td>
+                                <td className="p-2">{employee.applies ? `${employee.work_days_max} 天` : '—'}</td>
+                                <td className="p-2">{employee.rest_day_work_ok ? '可上第 6 天' : '不同意'}</td>
+                                <td className="p-2">{holidayPreferenceLabel(employee.holiday_work)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </details>
+                  </div>
+                ) : null}
+              </section>
+            )}
+
             <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm">
               <input
                 type="checkbox"
@@ -1834,6 +1943,7 @@ export default function SchedulesPage() {
           {(llmResult?.rejected.length ?? 0) > 0 && (
             <section className="space-y-2">
               <h3 className="font-medium text-muted-foreground">略過 {llmResult?.rejected_count} 筆不合格輸出</h3>
+              <p className="text-xs text-muted-foreground">以下為後端逐筆驗證原因，包含假日意願、休息日同意與例假限制時會原樣顯示。</p>
               <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg border p-3 text-sm">
                 {llmResult?.rejected.map((item, index) => (
                   <div key={index} className="rounded bg-muted/50 p-2">

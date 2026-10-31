@@ -30,7 +30,48 @@ export interface AIScheduleMetadata {
   mode?: string
   time_decay_n?: number
   billing?: AIBillingMetadata
+  rest_quota?: AIRestQuotaResult | null
   [key: string]: unknown
+}
+
+export interface AIRestQuotaHoliday {
+  date: string
+  name: string
+  kind: 'holiday' | 'makeup'
+}
+
+export interface AIRestQuotaEmployee {
+  employee_id: number
+  employee_code: string
+  name: string
+  pay_type: 'monthly' | 'hourly'
+  contract_type: string
+  applies: boolean
+  work_days_max: number | null
+  rest_day_work_ok: boolean
+  holiday_work: 'forbid' | 'allow' | 'prefer' | 'avoid'
+  work_days?: number
+  rest_days?: number
+  holiday_days_worked?: number
+  over_quota?: number
+}
+
+export interface AIRestQuotaResult {
+  period_days: number
+  weekly_rest_days: number
+  holiday_days: number
+  holidays: AIRestQuotaHoliday[]
+  rest_days_total: number
+  work_days_max: number
+  employees: AIRestQuotaEmployee[]
+}
+
+export interface AIRestQuotaRequest {
+  period_start: string
+  period_end: string
+  organization_id?: number
+  branch_id?: number
+  weekly_rest_days?: number
 }
 
 export interface AIScheduleResult {
