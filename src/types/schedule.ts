@@ -200,7 +200,64 @@ export interface StaffingCoverage {
   required_max: number | null
   assigned: number
   status: 'ok' | 'under' | 'over'
-  source: 'rule' | 'template'
+  /** plan＝每日班別計畫；unplanned＝計畫沒開卻有人；rule/template 只出現在沒有計畫的舊版本 */
+  source: 'plan' | 'unplanned' | 'rule' | 'template'
+}
+
+// ===== 每日班別計畫 (GET/PUT /schedules/versions/{id}/shift-plan/，2026-10-31) =====
+
+/** 星期範本鍵：'0'＝週一 … '6'＝週日 */
+export type ShiftPlanWeekdayKey = '0' | '1' | '2' | '3' | '4' | '5' | '6'
+
+/** 寫入用；後端回傳的範本以 shift_template_id 表示班別 */
+export interface ShiftPlanEntry {
+  shift_template?: number
+  shift_template_id?: number
+  min_staff: number
+  max_staff?: number | null
+}
+
+export type ShiftPlanTemplate = Partial<Record<ShiftPlanWeekdayKey, ShiftPlanEntry[]>>
+
+export interface ShiftPlanRow {
+  date: string
+  shift_template: number
+  shift_name: string
+  min_staff: number
+  max_staff: number | null
+}
+
+export interface ShiftPlan {
+  schedule_version: number
+  period_start: string
+  period_end: string
+  template: ShiftPlanTemplate
+  rows: ShiftPlanRow[]
+  summary: {
+    rows: number
+    days_planned: number
+    days_in_period: number
+    days_without_plan: number
+  }
+}
+
+export interface ShiftPlanApplyTemplateRequest {
+  template: ShiftPlanTemplate
+  period_start?: string
+  period_end?: string
+  overwrite?: boolean
+}
+
+export interface ShiftPlanCopyFromRequest {
+  source_version_id: number
+  period_start?: string
+  period_end?: string
+  overwrite?: boolean
+}
+
+export interface ShiftPlanDayRequest {
+  date: string
+  shifts: ShiftPlanEntry[]
 }
 
 // ===== 派生 A (POST /schedules/versions/{B_id}/derive-legal/) =====

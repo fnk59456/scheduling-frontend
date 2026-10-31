@@ -5,7 +5,7 @@ import {
   ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, Settings2,
   CheckCircle, Clock, ShieldCheck, ShieldAlert, ArrowRight, AlertTriangle,
   CalendarDays, Download, FileCheck2, GitCompareArrows, MinusCircle,
-  PencilLine, PlusCircle, Sparkles,
+  CalendarRange, PencilLine, PlusCircle, Sparkles,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -31,6 +31,7 @@ import {
   useUpdateScheduleVersion,
   useLLMGenerateSchedule,
   useRestQuota,
+  useShiftPlan,
 } from '@/hooks/useSchedules'
 import type {
   Schedule,
@@ -54,6 +55,8 @@ import {
 } from '@/lib/scheduleOverlap'
 import { EmployeeMonthScheduleDialog } from './EmployeeMonthScheduleDialog'
 import { WeekDatePicker } from './WeekDatePicker'
+import { ShiftPlanDialog, type ShiftPlanStep } from './ShiftPlanDialog'
+import { countDaysWithoutPlan, groupPlanRowsByDate, hasShiftPlan, hasShiftPlanInRange } from '@/lib/shiftPlan'
 import type { EmployeeListItem } from '@/types/employee'
 import type { LeaveRequest } from '@/types/leave'
 import { approvedLeaveDateMap, approvedLeaveFor, workingSchedules } from '@/lib/leaveDates'
@@ -482,6 +485,22 @@ export default function SchedulesPage() {
   const checkCompliance = useCheckCompliance()
   const updateVersion = useUpdateScheduleVersion()
   const llmGenerate = useLLMGenerateSchedule()
+
+  // ===== 每日班別計畫（2026-10-31）：這張班表每天開哪些班、各需幾人 =====
+  const shiftPlanQuery = useShiftPlan(selectedVersion?.id)
+  const shiftPlan = shiftPlanQuery.data
+  const shiftPlanActive = hasShiftPlan(shiftPlan)
+  const shiftPlanRowsByDate = useMemo(() => groupPlanRowsByDate(shiftPlan?.rows ?? []), [shiftPlan?.rows])
+  const daysWithoutShiftPlan = countDaysWithoutPlan(shiftPlan)
+  const [shiftPlanDialog, setShiftPlanDialog] = useState<{ version: ScheduleVersion; step: ShiftPlanStep } | null>(null)
+  const defaultShiftPlanPeriod = useMemo(() => {
+    const monthStart = startOfMonth(weekStart)
+    return { start: fmtDate(monthStart), end: fmtDate(endOfMonth(monthStart)) }
+  }, [weekStart])
+  const openShiftPlanDialog = (step: ShiftPlanStep, version: ScheduleVersion | null = selectedVersion) => {
+    if (!version) return
+    setShiftPlanDialog({ version, step })
+  }
   const [showRenameDialog, setShowRenameDialog] = useState(false)
   const [renameValue, setRenameValue] = useState('')
   const [showLLMScheduleDialog, setShowLLMScheduleDialog] = useState(false)
@@ -570,6 +589,9 @@ export default function SchedulesPage() {
     return map
   }, [complianceResult])
 
+  const unplannedCoverageCount = (complianceResult?.coverage ?? []).filter((item) => item.source === 'unplanned').length
+  const overCoverageCount = Math.max(0, (complianceResult?.coverage_summary.over ?? 0) - unplannedCoverageCount)
+
   const llmRangeDays = llmPeriodStart && llmPeriodEnd
     ? Math.round((parseDate(llmPeriodEnd).getTime() - parseDate(llmPeriodStart).getTime()) / 86400000) + 1
     : 0
@@ -637,8 +659,19 @@ export default function SchedulesPage() {
     setLlmPeriodEnd(fmtDate(end))
   }
 
-  const openLLMScheduleDialog = () => {
+  const openLLMScheduleDialog = async () => {
     if (!selectedVersion) return
+    // 沒有每日班別計畫時後端會回 400 shift_plan_required，先在前端擋下並導去設定
+    const { data: latestPlan } = await shiftPlanQuery.refetch()
+    if (latestPlan && !hasShiftPlan(latestPlan)) {
+      toast({
+        title: '請先設定每日班別',
+        description: '這張班表還沒有設定每天開哪些班、各需幾人，AI 無法排班。',
+        variant: 'destructive',
+      })
+      openShiftPlanDialog('template')
+      return
+    }
     setLlmPeriodStart(dateFrom)
     setLlmPeriodEnd(dateTo)
     setAllowMultipleShiftsPerDay(false)
@@ -649,6 +682,14 @@ export default function SchedulesPage() {
     event.preventDefault()
     if (!selectedVersion) return
     if (llmRangeError) return
+    if (shiftPlan && !hasShiftPlanInRange(shiftPlan, llmPeriodStart, llmPeriodEnd)) {
+      toast({
+        title: '所選期間沒有每日班別',
+        description: `${llmPeriodStart} ~ ${llmPeriodEnd} 每天都未開班，請調整日期區間或先設定每日班別。`,
+        variant: 'destructive',
+      })
+      return
+    }
     try {
       const result = await llmGenerate.mutateAsync({
         schedule_version: selectedVersion.id,
@@ -842,7 +883,11 @@ export default function SchedulesPage() {
 
     const created = await createVersion.mutateAsync(payload)
     setShowVersionDialog(false)
+    // 先等版本列表含有新版本再選取，避免自動選版 effect 在列表刷新前跳回第一個版本
+    await refetchVersions()
     setVersionId(String(created.id))
+    // 新班表直接進入每日班別設定：選期間 → 星期範本 → 逐日微調
+    openShiftPlanDialog('period', created)
   }
 
   // ===== 排班 CRUD 對話框 =====
@@ -1237,6 +1282,25 @@ export default function SchedulesPage() {
             </div>
           </CardContent>
         )}
+        {canEditSelectedVersion && shiftPlan && (!shiftPlanActive || daysWithoutShiftPlan > 0) && (
+          <CardContent className="pt-0">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+              <span>
+                {!shiftPlanActive
+                  ? '這張班表尚未設定每日班別（每天開哪些班、各需幾人），AI 無法排班。'
+                  : `有 ${daysWithoutShiftPlan} 天尚未設定班別，AI 不會排這些天。`}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 border-amber-300 bg-white/60 text-amber-800 hover:bg-white"
+                onClick={() => openShiftPlanDialog(shiftPlanActive ? 'calendar' : 'period')}
+              >
+                設定每日班別
+              </Button>
+            </div>
+          </CardContent>
+        )}
         <CardContent className="pt-0">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -1260,6 +1324,15 @@ export default function SchedulesPage() {
                 ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 : <Sparkles className="mr-2 h-4 w-4" />}
               {llmGenerate.isPending ? 'AI 排班中…' : 'AI 排班'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => openShiftPlanDialog(shiftPlanActive || !canEditSelectedVersion ? 'calendar' : 'period')}
+              disabled={!selectedVersion}
+            >
+              <CalendarRange className="mr-2 h-4 w-4" />
+              每日班別
             </Button>
             {/* 簽核／取消簽核共用同一按鈕位置 */}
             <Button
@@ -1366,9 +1439,14 @@ export default function SchedulesPage() {
                   ? `人力覆蓋：${complianceResult.coverage_summary.under} 個班次人力不足`
                   : '人力覆蓋達標'}
               </p>
-              {complianceResult.coverage_summary.over > 0 && (
+              {overCoverageCount > 0 && (
                 <p className="mt-0.5 text-sm text-amber-700">
-                  另有 {complianceResult.coverage_summary.over} 個班次超過設定上限
+                  另有 {overCoverageCount} 個班次超過設定上限
+                </p>
+              )}
+              {unplannedCoverageCount > 0 && (
+                <p className="mt-0.5 text-sm text-orange-700">
+                  {unplannedCoverageCount} 個班次在每日班別未開班的日子仍有人排班
                 </p>
               )}
               <p className="mt-0.5 text-xs text-muted-foreground">人力覆蓋屬營運檢查，不影響法規合規判定。</p>
@@ -1472,9 +1550,12 @@ export default function SchedulesPage() {
                       const isClosedDay = weeklyClosedDays.has((d.getDay() + 6) % 7)
                       const holiday = holidayByDate.get(date)
                       const coverage = coverageByDate.get(date) ?? []
+                      const plannedShifts = shiftPlanRowsByDate.get(date) ?? []
+                      const isUnplannedDay = shiftPlanActive && plannedShifts.length === 0
                       return (
                       <th key={idx} className={cn(
                         'min-w-36 p-3 text-left align-top',
+                        isUnplannedDay && 'bg-muted/60 text-muted-foreground',
                         isClosedDay && 'bg-slate-100/80 dark:bg-slate-900/50',
                         holiday?.kind === 'holiday' && 'bg-amber-50/80 dark:bg-amber-950/20',
                         holiday?.kind === 'makeup' && 'bg-sky-50/80 dark:bg-sky-950/20',
@@ -1485,16 +1566,35 @@ export default function SchedulesPage() {
                         </div>
                         {isClosedDay && <span className="mt-1 block text-[10px] font-medium text-slate-500">機構公休日</span>}
                         {holiday && <span className={cn('mt-1 block text-[10px] font-medium', holiday.kind === 'holiday' ? 'text-amber-700' : 'text-sky-700')}>{holiday.name}{holiday.kind === 'makeup' ? '（補假日）' : ''}</span>}
+                        {isUnplannedDay && <span className="mt-1 block text-[10px] font-medium">未開班</span>}
+                        {coverage.length === 0 && plannedShifts.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1" aria-label="當天開的班別">
+                            {plannedShifts.map((row) => (
+                              <span
+                                key={row.shift_template}
+                                className="rounded border bg-background/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                                title={`每日班別：${row.shift_name} 最少 ${row.min_staff} 人${row.max_staff == null ? '' : `、最多 ${row.max_staff} 人`}`}
+                              >
+                                {row.shift_name} {row.min_staff}{row.max_staff != null && row.max_staff !== row.min_staff ? `–${row.max_staff}` : ''}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         {coverage.length > 0 && (
                           <div className="mt-2 space-y-1">
                             {coverage.map((item) => (
                               <div key={`${item.shift_template_id ?? 'all'}-${item.source}`} className={cn(
                                 'rounded border px-1.5 py-1 text-[10px] font-medium leading-tight',
                                 item.status === 'under' && 'border-rose-200 bg-rose-50 text-rose-700',
-                                item.status === 'over' && 'border-amber-200 bg-amber-50 text-amber-700',
+                                item.status === 'over' && item.source !== 'unplanned' && 'border-amber-200 bg-amber-50 text-amber-700',
                                 item.status === 'ok' && 'border-emerald-200 bg-emerald-50 text-emerald-700',
-                              )} title={`已排 ${item.assigned}／最少 ${item.required_min}${item.required_max === null ? '' : `／最多 ${item.required_max}`}`}>
-                                {item.shift_name || '全日'} {item.assigned}/{item.required_min}{item.status === 'under' ? ' 人力不足' : item.status === 'over' ? ' 超過上限' : ' 已達標'}
+                                item.source === 'unplanned' && 'border-orange-300 bg-orange-50 text-orange-700',
+                              )} title={item.source === 'unplanned'
+                                ? '這天的計畫沒有開這個班，是要改計畫還是移走這個人？'
+                                : `已排 ${item.assigned}／最少 ${item.required_min}${item.required_max === null ? '' : `／最多 ${item.required_max}`}`}>
+                                {item.source === 'unplanned'
+                                  ? `${item.shift_name || '全日'} 未開班（已排 ${item.assigned} 人）`
+                                  : `${item.shift_name || '全日'} ${item.assigned}/${item.required_min}${item.status === 'under' ? ' 人力不足' : item.status === 'over' ? ' 超過上限' : ' 已達標'}`}
                               </div>
                             ))}
                           </div>
@@ -1543,6 +1643,8 @@ export default function SchedulesPage() {
                           ? versionResolutionByDate.get(fmtDate(weekDays[dayIndex - 1]))?.version
                           : null
                         const isVersionBoundary = dayIndex > 0 && ownerVersion?.id !== previousOwner?.id
+                        const plannedShiftIds = new Set((shiftPlanRowsByDate.get(date) ?? []).map((row) => row.shift_template))
+                        const isUnplannedDay = shiftPlanActive && plannedShiftIds.size === 0
 
                         return (
                           <td
@@ -1554,6 +1656,7 @@ export default function SchedulesPage() {
                               isVersionBoundary && 'border-l-2 border-l-primary/50',
                               hasConflict && 'bg-destructive/5',
                               isClosedDay && 'bg-slate-100/70 dark:bg-slate-900/40',
+                              isUnplannedDay && 'bg-muted/40',
                               isDragTarget && 'bg-primary/10 outline outline-2 outline-primary/40 rounded-md',
                             )}
                             onDragOver={(ev) => { ev.preventDefault(); setDragOver({ employeeId: e.id, date }) }}
@@ -1578,7 +1681,10 @@ export default function SchedulesPage() {
                                   const isCrossVersionWarning = crossVersionSchedules.length > 0
                                   const isScheduledOnLeave = !isLeave && cellLeaves.length > 0
                                   const isSoft = (violation?.severity === 'soft' || isCrossVersionWarning || isScheduledOnLeave) && !isHard
+                                  // 拖放不擋（警告哲學），但計畫沒開的班要立即標示
+                                  const isUnplannedShift = shiftPlanActive && !isLeave && !plannedShiftIds.has(schedule.shift_template.id)
                                   const title = [
+                                    ...(isUnplannedShift ? ['未開班：這天的每日班別沒有開這個班，是要改計畫還是移走這個人？'] : []),
                                     ...(isScheduledOnLeave ? [`請假警告：${cellLeaves.map((leave) => leave.leave_type_display).join('、')}已核准，仍允許手動排班`] : []),
                                     ...warnings,
                                     ...crossVersionSchedules.map((other) => {
@@ -1631,6 +1737,9 @@ export default function SchedulesPage() {
                                           <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
                                             {isLeave ? `原排：${schedule.shift_template.name}` : `${schedule.shift_template.start_time.slice(0, 5)}-${schedule.shift_template.end_time.slice(0, 5)}`}
                                           </div>
+                                          {isUnplannedShift && (
+                                            <span className="mt-1 inline-block rounded border border-orange-300 bg-orange-50 px-1 text-[10px] font-medium text-orange-700">未開班</span>
+                                          )}
                                         </div>
                                         {(isHard || isSoft) && !isLeave && (
                                           <AlertTriangle className={cn(
@@ -2067,6 +2176,21 @@ export default function SchedulesPage() {
           templates={templates}
           violations={complianceResult?.violations ?? []}
           versions={versions}
+        />
+      )}
+
+      {/* ===== 每日班別 Dialog ===== */}
+      {shiftPlanDialog && (
+        <ShiftPlanDialog
+          open
+          onOpenChange={(open) => { if (!open) setShiftPlanDialog(null) }}
+          version={shiftPlanDialog.version}
+          shiftTemplates={templates}
+          sourceVersions={versions.filter((version) => (
+            version.organization === shiftPlanDialog.version.organization && version.status !== 'archived'
+          ))}
+          initialStep={shiftPlanDialog.step}
+          defaultPeriod={defaultShiftPlanPeriod}
         />
       )}
 

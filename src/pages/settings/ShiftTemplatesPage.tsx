@@ -41,7 +41,7 @@ export default function ShiftTemplatesPage() {
 
   const [showDialog, setShowDialog] = useState(false)
   const [editing, setEditing] = useState<ShiftTemplate | null>(null)
-  const [form, setForm] = useState({ organization: '', name: '', start_time: '', end_time: '', break_minutes: '30', overlap_minutes: '0', min_staff_count: '1' })
+  const [form, setForm] = useState({ organization: '', name: '', start_time: '', end_time: '', break_minutes: '30', overlap_minutes: '0' })
 
   // --- 員工優先順序 Dialog ---
   const [priorityShift, setPriorityShift] = useState<ShiftTemplate | null>(null)
@@ -118,7 +118,7 @@ export default function ShiftTemplatesPage() {
 
   const openCreate = () => {
     setEditing(null)
-    setForm({ organization: '', name: '', start_time: '', end_time: '', break_minutes: '30', overlap_minutes: '0', min_staff_count: '1' })
+    setForm({ organization: '', name: '', start_time: '', end_time: '', break_minutes: '30', overlap_minutes: '0' })
     setShowDialog(true)
   }
 
@@ -128,7 +128,6 @@ export default function ShiftTemplatesPage() {
       organization: String(t.organization), name: t.name,
       start_time: t.start_time, end_time: t.end_time,
       break_minutes: String(t.break_minutes), overlap_minutes: String(t.overlap_minutes),
-      min_staff_count: String(t.min_staff_count),
     })
     setShowDialog(true)
   }
@@ -139,7 +138,6 @@ export default function ShiftTemplatesPage() {
       organization: Number(form.organization), name: form.name,
       start_time: form.start_time, end_time: form.end_time,
       break_minutes: Number(form.break_minutes), overlap_minutes: Number(form.overlap_minutes),
-      min_staff_count: Number(form.min_staff_count),
     }
     if (editing) {
       await updateTemplate.mutateAsync({ id: editing.id, data: payload })
@@ -156,7 +154,7 @@ export default function ShiftTemplatesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold">班別模板</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">定義可重複使用的班別，包含時段、人力門檻與證照要求</p>
+          <p className="text-sm text-muted-foreground mt-0.5">定義有哪些班別（時段、休息與證照要求）；每天開哪些班、各需幾人，請在班表的「每日班別」設定</p>
         </div>
         <Button onClick={openCreate}><Plus className="h-4 w-4 mr-2" />新增班別</Button>
       </div>
@@ -188,7 +186,7 @@ export default function ShiftTemplatesPage() {
                   {[
                     { label: '時長',     value: `${t.duration_hours} h` },
                     { label: '休息',     value: `${t.break_minutes} min` },
-                    { label: '最少人力', value: `${t.min_staff_count} 人` },
+                    { label: '交接重疊', value: `${t.overlap_minutes} min` },
                   ].map((stat) => (
                     <div key={stat.label}>
                       <div className="text-xs text-muted-foreground">{stat.label}</div>
@@ -309,7 +307,7 @@ export default function ShiftTemplatesPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{editing ? '編輯班別' : '新增班別'}</DialogTitle>
-            <DialogDescription>設定班別的時間、休息與人力配置</DialogDescription>
+            <DialogDescription>設定班別的時間、休息與證照要求</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
@@ -337,7 +335,7 @@ export default function ShiftTemplatesPage() {
                 <Input type="time" value={form.end_time} onChange={(e) => set('end_time', e.target.value)} required />
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>休息(分鐘)</Label>
                 <Input type="number" value={form.break_minutes} onChange={(e) => set('break_minutes', e.target.value)} min={0} />
@@ -345,10 +343,6 @@ export default function ShiftTemplatesPage() {
               <div className="space-y-1.5">
                 <Label>交接重疊(分鐘)</Label>
                 <Input type="number" value={form.overlap_minutes} onChange={(e) => set('overlap_minutes', e.target.value)} min={0} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>最少人力</Label>
-                <Input type="number" value={form.min_staff_count} onChange={(e) => set('min_staff_count', e.target.value)} min={1} />
               </div>
             </div>
             <DialogFooter>

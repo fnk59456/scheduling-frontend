@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { scheduleVersionsApi, schedulesApi, scheduleChangesApi, scheduleOverlapDecisionsApi } from '@/api/endpoints/schedules'
 import { parseApiErrorMessage } from '@/api/errors'
 import type {
@@ -8,6 +8,10 @@ import type {
   CheckComplianceRequest,
   DeriveLegalRequest,
   ScheduleOverlapDecisionType,
+  ShiftPlan,
+  ShiftPlanApplyTemplateRequest,
+  ShiftPlanCopyFromRequest,
+  ShiftPlanDayRequest,
 } from '@/types/schedule'
 import { toast } from '@/hooks/use-toast'
 import axios from 'axios'
@@ -17,6 +21,7 @@ import type { AIRestQuotaRequest, LLMScheduleRequest } from '@/types/ai'
 const VERSIONS_KEY = ['scheduleVersions']
 const SCHEDULES_KEY = ['schedules']
 const CHANGES_KEY = ['scheduleChanges']
+const SHIFT_PLAN_KEY = ['scheduleShiftPlan']
 
 export function useScheduleVersions(params?: { organization?: number; version_type?: string; status?: string; search?: string }) {
   return useQuery({
@@ -237,6 +242,14 @@ export function useLLMGenerateSchedule() {
     },
     onError: (error) => {
       const status = axios.isAxiosError(error) ? error.response?.status : undefined
+      if (isShiftPlanRequiredError(error)) {
+        toast({
+          title: '請先設定每日班別',
+          description: '這張班表（或所選期間）還沒有設定每天開哪些班、各需幾人，AI 無法排班。請按「每日班別」完成設定。',
+          variant: 'destructive',
+        })
+        return
+      }
       const fallback = status === 402
         ? '本月 AI 用量已達上限'
         : status === 409
@@ -260,3 +273,66 @@ export function useRestQuota(params: AIRestQuotaRequest | undefined, enabled = t
   })
 }
 
+/** 後端 400 `shift_plan_required`：版本或所選期間沒有任何每日班別計畫 */
+export function isShiftPlanRequiredError(error: unknown) {
+  if (!axios.isAxiosError(error)) return false
+  const data = error.response?.data as { code?: unknown } | undefined
+  return error.response?.status === 400 && data?.code === 'shift_plan_required'
+}
+
+// ===== 每日班別計畫 =====
+
+export function useShiftPlan(versionId: number | undefined) {
+  return useQuery({
+    queryKey: [...SHIFT_PLAN_KEY, versionId],
+    queryFn: () => scheduleVersionsApi.getShiftPlan(versionId!),
+    enabled: !!versionId,
+  })
+}
+
+/** 寫入後直接把回傳的計畫放進快取；期間可能被撐大，版本列表也一併刷新 */
+function onShiftPlanSaved(qc: QueryClient, versionId: number, plan: ShiftPlan) {
+  qc.setQueryData([...SHIFT_PLAN_KEY, versionId], plan)
+  qc.invalidateQueries({ queryKey: VERSIONS_KEY })
+}
+
+function shiftPlanErrorToast(err: unknown) {
+  const status = axios.isAxiosError(err) ? err.response?.status : undefined
+  toast({
+    title: '每日班別儲存失敗',
+    description: status === 409
+      ? '已簽核版本的每日班別為唯讀，請先取消簽核。'
+      : parseApiErrorMessage(err, '無法儲存每日班別'),
+    variant: 'destructive',
+  })
+}
+
+export function useApplyShiftPlanTemplate() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ versionId, data }: { versionId: number; data: ShiftPlanApplyTemplateRequest }) =>
+      scheduleVersionsApi.applyShiftPlanTemplate(versionId, data),
+    onSuccess: (plan, { versionId }) => onShiftPlanSaved(qc, versionId, plan),
+    onError: shiftPlanErrorToast,
+  })
+}
+
+export function useCopyShiftPlanFrom() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ versionId, data }: { versionId: number; data: ShiftPlanCopyFromRequest }) =>
+      scheduleVersionsApi.copyShiftPlanFrom(versionId, data),
+    onSuccess: (plan, { versionId }) => onShiftPlanSaved(qc, versionId, plan),
+    onError: shiftPlanErrorToast,
+  })
+}
+
+export function useReplaceShiftPlanDay() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ versionId, data }: { versionId: number; data: ShiftPlanDayRequest }) =>
+      scheduleVersionsApi.replaceShiftPlanDay(versionId, data),
+    onSuccess: (plan, { versionId }) => onShiftPlanSaved(qc, versionId, plan),
+    onError: shiftPlanErrorToast,
+  })
+}

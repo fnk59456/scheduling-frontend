@@ -9,7 +9,6 @@ export interface ShiftTemplate {
   end_time: string
   break_minutes: number
   overlap_minutes: number
-  min_staff_count: number
   required_certifications: Certification[]
   certification_ids: number[]
   duration_hours: number
@@ -40,7 +39,6 @@ export interface ShiftTemplateCreateRequest {
   end_time: string
   break_minutes?: number
   overlap_minutes?: number
-  min_staff_count?: number
   certification_ids?: number[]
 }
 
@@ -108,34 +106,4 @@ export interface ShiftEmployeePriorityUpdateItem {
   employee: number
   priority_rank: number
   max_extra_shifts: number | null
-}
-
-export interface StaffingRequirement {
-  id: number
-  organization: number
-  branch: number | null
-  branch_name: string | null
-  shift_template: number | null
-  shift_template_name: string | null
-  weekday: number | null
-  weekday_label: string | null
-  date: string | null
-  min_staff: number
-  max_staff: number | null
-  note: string
-  is_active: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface StaffingRequirementCreateRequest {
-  organization?: number
-  branch?: number | null
-  shift_template?: number | null
-  weekday?: number | null
-  date?: string | null
-  min_staff: number
-  max_staff?: number | null
-  note?: string
-  is_active?: boolean
 }

@@ -27,7 +27,6 @@ import AuditPage from '@/pages/audit/AuditPage'
 import PlaceholderPage from '@/pages/PlaceholderPage'
 import OrganizationOnboardingPage from '@/pages/OrganizationOnboardingPage'
 import ComplianceSettingsPage from '@/pages/settings/ComplianceSettingsPage'
-import StaffingRequirementsPage from '@/pages/settings/StaffingRequirementsPage'
 import { Toaster } from '@/components/ui/toaster'
 import './index.css'
 
@@ -66,7 +65,8 @@ function App() {
                       <Route path="/settings" element={<SettingsPage />}>
                         <Route index element={<Navigate to="/settings/shifts" replace />} />
                         <Route path="shifts" element={<ShiftTemplatesPage />} />
-                        <Route path="staffing" element={<StaffingRequirementsPage />} />
+                        {/* 2026-10-31：人力改在各班表的「每日班別」設定，舊網址導回班別模板 */}
+                        <Route path="staffing" element={<Navigate to="/settings/shifts" replace />} />
                         <Route path="priorities" element={<EmployeePrioritiesPage />} />
                         <Route path="rules" element={<ShiftRulesPage />} />
                         <Route path="organizations" element={<OrganizationsPage />} />
@@ -107,7 +107,8 @@ function App() {
                           <Route index element={<Navigate to="/settings/organizations" replace />} />
                           <Route path="organizations" element={<OrganizationsPage />} />
                           <Route path="shifts" element={<ShiftTemplatesPage />} />
-                          <Route path="staffing" element={<StaffingRequirementsPage />} />
+                          {/* 2026-10-31：人力改在各班表的「每日班別」設定，舊網址導回班別模板 */}
+                          <Route path="staffing" element={<Navigate to="/settings/shifts" replace />} />
                           <Route path="priorities" element={<EmployeePrioritiesPage />} />
                           <Route path="rules" element={<ShiftRulesPage />} />
                           <Route path="certifications" element={<CertificationsPage />} />

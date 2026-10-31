@@ -17,6 +17,11 @@ import type {
   ScheduleDayOverviewResponse,
   ScheduleOverlapDecision,
   ScheduleOverlapDecisionType,
+  ShiftPlan,
+  ShiftPlanApplyTemplateRequest,
+  ShiftPlanCopyFromRequest,
+  ShiftPlanDayRequest,
+  ShiftPlanRow,
 } from '@/types/schedule'
 
 export const scheduleVersionsApi = {
@@ -77,6 +82,22 @@ export const scheduleVersionsApi = {
     apiClient
       .post<DeriveLegalResult>(`/schedules/versions/${bVersionId}/derive-legal/`, body ?? {})
       .then((r) => r.data),
+
+  // ===== 每日班別計畫（2026-10-31）：這張班表每天開哪些班、各需幾人 =====
+  getShiftPlan: (id: number) =>
+    apiClient.get<ShiftPlan>(`/schedules/versions/${id}/shift-plan/`).then((r) => r.data),
+
+  replaceShiftPlan: (id: number, rows: Array<Pick<ShiftPlanRow, 'date' | 'shift_template' | 'min_staff' | 'max_staff'>>) =>
+    apiClient.put<ShiftPlan>(`/schedules/versions/${id}/shift-plan/`, { rows }).then((r) => r.data),
+
+  replaceShiftPlanDay: (id: number, data: ShiftPlanDayRequest) =>
+    apiClient.put<ShiftPlan>(`/schedules/versions/${id}/shift-plan/day/`, data).then((r) => r.data),
+
+  applyShiftPlanTemplate: (id: number, data: ShiftPlanApplyTemplateRequest) =>
+    apiClient.post<ShiftPlan>(`/schedules/versions/${id}/shift-plan/apply-template/`, data).then((r) => r.data),
+
+  copyShiftPlanFrom: (id: number, data: ShiftPlanCopyFromRequest) =>
+    apiClient.post<ShiftPlan>(`/schedules/versions/${id}/shift-plan/copy-from/`, data).then((r) => r.data),
 }
 
 export const scheduleOverlapDecisionsApi = {
