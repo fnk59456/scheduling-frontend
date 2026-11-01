@@ -1567,19 +1567,6 @@ export default function SchedulesPage() {
                         {isClosedDay && <span className="mt-1 block text-[10px] font-medium text-slate-500">機構公休日</span>}
                         {holiday && <span className={cn('mt-1 block text-[10px] font-medium', holiday.kind === 'holiday' ? 'text-amber-700' : 'text-sky-700')}>{holiday.name}{holiday.kind === 'makeup' ? '（補假日）' : ''}</span>}
                         {isUnplannedDay && <span className="mt-1 block text-[10px] font-medium">未開班</span>}
-                        {coverage.length === 0 && plannedShifts.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-1" aria-label="當天開的班別">
-                            {plannedShifts.map((row) => (
-                              <span
-                                key={row.shift_template}
-                                className="rounded border bg-background/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
-                                title={`每日班別：${row.shift_name} 最少 ${row.min_staff} 人${row.max_staff == null ? '' : `、最多 ${row.max_staff} 人`}`}
-                              >
-                                {row.shift_name} {row.min_staff}{row.max_staff != null && row.max_staff !== row.min_staff ? `–${row.max_staff}` : ''}
-                              </span>
-                            ))}
-                          </div>
-                        )}
                         {coverage.length > 0 && (
                           <div className="mt-2 space-y-1">
                             {coverage.map((item) => (
