@@ -24,6 +24,24 @@ const emptyForm = {
   agreed_hours_per_week: '40', hire_date: '',
 }
 
+// 後端拒收早於 1950-01-01 的到職日（擋民國年誤輸入）；上限放到一年後，容許預先建檔
+const HIRE_DATE_MIN = '1950-01-01'
+
+function hireDateMax() {
+  const d = new Date()
+  d.setFullYear(d.getFullYear() + 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** 原生 date input 打民國年（110）會得到西元 0110 年；年份 < 1911 視為民國年並換算 */
+function convertRocHireDate(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return null
+  const year = Number(match[1])
+  if (year <= 0 || year >= 1911) return null
+  return { rocYear: year, value: `${year + 1911}-${match[2]}-${match[3]}` }
+}
+
 export function EmployeeFormDialog({ open, onOpenChange, employee, onDeleted }: Props) {
   const isEdit = !!employee
   const createEmployee = useCreateEmployee()
@@ -47,9 +65,11 @@ export function EmployeeFormDialog({ open, onOpenChange, employee, onDeleted }: 
 
   const [form, setForm] = useState(emptyForm)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [hireDateNote, setHireDateNote] = useState('')
 
   useEffect(() => {
     if (!open) return
+    setHireDateNote('')
 
     if (!employee) {
       setForm(emptyForm)
@@ -74,6 +94,14 @@ export function EmployeeFormDialog({ open, onOpenChange, employee, onDeleted }: 
   }, [open, employee])
 
   const set = (key: string, val: string) => setForm((p) => ({ ...p, [key]: val }))
+
+  // 逐字輸入年份時（2→20→202→2021）中途值也會 < 1911，所以等離開欄位才換算
+  const normalizeHireDate = () => {
+    const converted = convertRocHireDate(form.hire_date)
+    if (!converted) return
+    set('hire_date', converted.value)
+    setHireDateNote(`已將民國 ${converted.rocYear} 年換算為西元 ${converted.value.replace(/-/g, '/')}，請確認`)
+  }
 
   const filteredBranches = form.organization
     ? branches.filter((b) => b.organization === Number(form.organization))
@@ -239,7 +267,8 @@ export function EmployeeFormDialog({ open, onOpenChange, employee, onDeleted }: 
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {/* 兩欄 × 兩列：四欄並排時到職日太窄，日曆圖示會被擠掉 */}
+          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>契約類型</Label>
               <Select value={form.contract_type} onValueChange={(v) => set('contract_type', v)}>
@@ -266,8 +295,22 @@ export function EmployeeFormDialog({ open, onOpenChange, employee, onDeleted }: 
               <Input type="number" value={form.agreed_hours_per_week} onChange={(e) => set('agreed_hours_per_week', e.target.value)} min={1} max={168} required />
             </div>
             <div className="space-y-1.5">
-              <Label>到職日</Label>
-              <Input type="date" value={form.hire_date} onChange={(e) => set('hire_date', e.target.value)} required />
+              <Label>
+                到職日 <span className="text-xs font-normal text-muted-foreground">西元年，例如 2021/01/01</span>
+              </Label>
+              <Input
+                type="date"
+                value={form.hire_date}
+                onChange={(e) => {
+                  set('hire_date', e.target.value)
+                  setHireDateNote('')
+                }}
+                onBlur={normalizeHireDate}
+                min={HIRE_DATE_MIN}
+                max={hireDateMax()}
+                required
+              />
+              {hireDateNote && <p className="text-xs text-amber-700">{hireDateNote}</p>}
             </div>
           </div>
 
