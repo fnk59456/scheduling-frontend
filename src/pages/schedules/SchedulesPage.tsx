@@ -3,9 +3,10 @@ import { useQueries } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, Settings2,
-  CheckCircle, Clock, ShieldCheck, ShieldAlert, ArrowRight, AlertTriangle,
+  CheckCircle, Clock, ShieldCheck, ArrowRight, AlertTriangle,
   CalendarDays, Download, FileCheck2, GitCompareArrows, MinusCircle,
   CalendarRange, PencilLine, PlusCircle, Sparkles,
+  Copy, Move,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -62,6 +63,13 @@ import type { LeaveRequest } from '@/types/leave'
 import { approvedLeaveDateMap, approvedLeaveFor, workingSchedules } from '@/lib/leaveDates'
 import { useComplianceSettings, useHolidayCalendar } from '@/hooks/useCompliance'
 import type { LLMScheduleResult } from '@/types/ai'
+import { ComplianceResultsPanel } from './ComplianceResultsPanel'
+import {
+  immediateIssueSuggestions,
+  issueFromViolation,
+  type IssueSeverity,
+  type ScheduleIssue,
+} from '@/lib/scheduleCompliance'
 
 function fmtDate(d: Date) {
   const yyyy = d.getFullYear()
@@ -112,6 +120,7 @@ const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日']
 
 type VersionGroup = 'unapproved' | 'approved'
 type CompareFilter = 'all' | 'removed' | 'added' | 'changed'
+type ScheduleIssueFilter = 'all' | IssueSeverity
 
 type CompareRow = {
   key: string
@@ -537,6 +546,7 @@ export default function SchedulesPage() {
   }
   const [dragSource, setDragSource] = useState<DragSource | null>(null)
   const [dragOver, setDragOver] = useState<{ employeeId: number; date: string } | null>(null)
+  const [dragMode, setDragMode] = useState<'move' | 'copy'>('move')
   const [showUnapproveDialog, setShowUnapproveDialog] = useState(false)
   const [unapproveReason, setUnapproveReason] = useState('')
   const [pendingLeaveAction, setPendingLeaveAction] = useState<{
@@ -568,15 +578,15 @@ export default function SchedulesPage() {
   // ===== 工作流狀態 =====
   const [phase, setPhase] = useState<WorkflowPhase>('editing')
   const [complianceResult, setComplianceResult] = useState<CheckComplianceResult | null>(null)
-
-  const hardViolations = complianceResult?.violations.filter((v) => v.severity === 'hard') ?? []
-  const softViolations = complianceResult?.violations.filter((v) => v.severity === 'soft') ?? []
+  const [showCompliancePanel, setShowCompliancePanel] = useState(false)
+  const [scheduleIssueFilter, setScheduleIssueFilter] = useState<ScheduleIssueFilter>('all')
 
   const violationMap = useMemo(() => {
-    const map = new Map<string, ComplianceViolation>()
+    const map = new Map<string, ComplianceViolation[]>()
     if (!complianceResult) return map
     for (const v of complianceResult.violations) {
-      map.set(violationCellKey(v), v)
+      const key = violationCellKey(v)
+      map.set(key, [...(map.get(key) ?? []), v])
     }
     return map
   }, [complianceResult])
@@ -588,9 +598,6 @@ export default function SchedulesPage() {
     }
     return map
   }, [complianceResult])
-
-  const unplannedCoverageCount = (complianceResult?.coverage ?? []).filter((item) => item.source === 'unplanned').length
-  const overCoverageCount = Math.max(0, (complianceResult?.coverage_summary.over ?? 0) - unplannedCoverageCount)
 
   const llmRangeDays = llmPeriodStart && llmPeriodEnd
     ? Math.round((parseDate(llmPeriodEnd).getTime() - parseDate(llmPeriodStart).getTime()) / 86400000) + 1
@@ -653,6 +660,92 @@ export default function SchedulesPage() {
     }
     return violation.rule_label
   }
+
+  const scheduleIssuesById = useMemo(() => {
+    const map = new Map<number, ScheduleIssue[]>()
+    const softRuleTypes = complianceResult?.soft_rule_types ?? []
+    for (const schedule of schedules) {
+      if (schedule.status === 'leave') continue
+      const issues: ScheduleIssue[] = []
+      const cellKey = `${schedule.employee.id}:${schedule.schedule_date}:${schedule.shift_template.id}`
+      const cellViolations = violationMap.get(cellKey) ?? []
+      for (const violation of cellViolations) {
+        issues.push(issueFromViolation(violation, softRuleTypes, complianceMessage(violation)))
+      }
+      for (const [index, warning] of (immediateWarningMap.get(schedule.id) ?? []).entries()) {
+        const isOverlap = warning.includes('重疊')
+        const isDuplicateDailyHours = !isOverlap && cellViolations.some((violation) => (
+          violation.rule === 'max_daily_hours' || violation.rule === 'max_daily_total_hours'
+        ))
+        if (isDuplicateDailyHours) continue
+        issues.push({
+          id: `immediate:${schedule.id}:${index}`,
+          severity: 'hard',
+          title: isOverlap ? '同日班次時間重疊' : '單日工時超限',
+          message: warning,
+          suggestion: isOverlap ? immediateIssueSuggestions.overlap : immediateIssueSuggestions.dailyHours,
+          relatedDates: [],
+        })
+      }
+      for (const other of crossVersionWarningMap.get(schedule.id) ?? []) {
+        const version = timelineVersions.find((item) => item.id === other.schedule_version)
+        issues.push({
+          id: `cross-version:${schedule.id}:${other.id}`,
+          severity: 'soft',
+          title: '跨版本重疊',
+          message: `與 ${version?.version_label ?? `版本 #${other.schedule_version}`} 的 ${other.shift_template.name} 重疊`,
+          suggestion: immediateIssueSuggestions.crossVersion,
+          relatedDates: other.schedule_date === schedule.schedule_date ? [] : [other.schedule_date],
+        })
+      }
+      const leaves = approvedLeaveFor(leaveDateMap, schedule.employee.id, schedule.schedule_date)
+      if (leaves.length > 0) {
+        issues.push({
+          id: `leave:${schedule.id}`,
+          severity: 'soft',
+          title: '請假日排班',
+          message: `${leaves.map((leave) => leave.leave_type_display).join('、')}已核准，仍排有班次`,
+          suggestion: immediateIssueSuggestions.leave,
+          relatedDates: [],
+        })
+      }
+      const plannedShiftIds = new Set((shiftPlanRowsByDate.get(schedule.schedule_date) ?? []).map((row) => row.shift_template))
+      if (shiftPlanActive && !plannedShiftIds.has(schedule.shift_template.id)) {
+        issues.push({
+          id: `unplanned:${schedule.id}`,
+          severity: 'soft',
+          title: '未開班',
+          message: '這天的每日班別沒有開這個班。',
+          suggestion: immediateIssueSuggestions.unplanned,
+          relatedDates: [],
+        })
+      }
+      if (issues.length > 0) map.set(schedule.id, issues)
+    }
+    return map
+  }, [
+    complianceResult?.soft_rule_types,
+    crossVersionWarningMap,
+    employees,
+    immediateWarningMap,
+    leaveDateMap,
+    schedules,
+    shiftPlanActive,
+    shiftPlanRowsByDate,
+    timelineVersions,
+    violationMap,
+  ])
+
+  const weekIssueCounts = useMemo(() => {
+    let hard = 0
+    let soft = 0
+    for (const schedule of schedules) {
+      const issues = scheduleIssuesById.get(schedule.id) ?? []
+      if (issues.some((issue) => issue.severity === 'hard')) hard += 1
+      if (issues.some((issue) => issue.severity === 'soft')) soft += 1
+    }
+    return { hard, soft }
+  }, [scheduleIssuesById, schedules])
 
   const setLLMPeriod = (start: Date, end: Date) => {
     setLlmPeriodStart(fmtDate(start))
@@ -726,6 +819,8 @@ export default function SchedulesPage() {
   const resetWorkflow = () => {
     setPhase('editing')
     setComplianceResult(null)
+    setShowCompliancePanel(false)
+    setScheduleIssueFilter('all')
   }
 
   useEffect(() => {
@@ -739,6 +834,7 @@ export default function SchedulesPage() {
     try {
       const result = await checkCompliance.mutateAsync({ versionId: selectedVersion.id })
       setComplianceResult(result)
+      setShowCompliancePanel(true)
 
       const hards = result.violations.filter((v) => v.severity === 'hard')
       if (hards.length === 0) {
@@ -777,33 +873,48 @@ export default function SchedulesPage() {
       }
 
       const crossVersionOverlaps = findCandidateCrossVersionOverlaps({
-        scheduleId: src.id,
+        scheduleId: dragMode === 'move' ? src.id : undefined,
         scheduleVersionId: selectedVersion.id,
         employeeId: targetEmployeeId,
         scheduleDate: targetDate,
         shiftTemplateId: src.shiftTemplateId,
       }, validationSchedules, templates)
 
-      await schedulesApi.update(src.id, {
-        ...srcBase,
-        employee: targetEmployeeId,
-        schedule_date: targetDate,
-      })
+      if (dragMode === 'copy') {
+        const template = templates.find((item) => item.id === src.shiftTemplateId)
+        await schedulesApi.create({
+          schedule_version: selectedVersion.id,
+          employee: targetEmployeeId,
+          schedule_date: targetDate,
+          shift_template: src.shiftTemplateId,
+          expected_hours: Number(template?.duration_hours ?? src.expectedHours),
+          status: 'assigned',
+          notes: '',
+        })
+      } else {
+        await schedulesApi.update(src.id, {
+          ...srcBase,
+          employee: targetEmployeeId,
+          schedule_date: targetDate,
+        })
+      }
       if (crossVersionOverlaps.length > 0) {
         const details = crossVersionOverlaps.slice(0, 3).map((schedule) => {
           const version = timelineVersions.find((item) => item.id === schedule.schedule_version)
           return `${version?.version_label ?? `版本 #${schedule.schedule_version}`} ${schedule.shift_template.start_time.slice(0, 5)}-${schedule.shift_template.end_time.slice(0, 5)}`
         })
         toast({
-          title: `${targetSchedules.length ? '班次已合併' : '班次已移動'}，發現 ${crossVersionOverlaps.length} 筆跨版本重疊`,
+          title: `${dragMode === 'copy' ? '班次已複製' : targetSchedules.length ? '班次已合併' : '班次已移動'}，發現 ${crossVersionOverlaps.length} 筆跨版本重疊`,
           description: `${targetDate}：${details.join('、')}。本次操作已保留，請留意班次右下角警示。`,
         })
       } else {
         toast({
-          title: targetSchedules.length ? '班次合併成功' : '移動成功',
-          description: targetSchedules.length
-            ? '班次已加入目標日期；如有同版本重疊或超時會顯示警告。'
-            : '班表已移動',
+          title: dragMode === 'copy' ? '已複製班次' : targetSchedules.length ? '班次合併成功' : '移動成功',
+          description: dragMode === 'copy'
+            ? '原班次已保留，目標位置已新增相同班別。'
+            : targetSchedules.length
+              ? '班次已加入目標日期；如有同版本重疊或超時會顯示警告。'
+              : '班表已移動',
         })
       }
       resetWorkflow()
@@ -1405,109 +1516,18 @@ export default function SchedulesPage() {
         </CardContent>
       </Card>
 
-      {/* ===== 合規結果條 ===== */}
-      {phase === 'done' && complianceResult && hardViolations.length === 0 && (
-        <Card className="border-emerald-200 bg-emerald-50/50">
-          <CardContent className="py-4 flex items-center gap-3">
-            <ShieldCheck className="h-5 w-5 text-emerald-600" />
-            <div>
-              <p className="font-medium text-emerald-800">法規合規通過</p>
-              {softViolations.length > 0 && (
-                <p className="text-sm text-emerald-700 mt-0.5">{softViolations.length} 筆軟性提醒（不影響合規判定）</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {complianceResult && (
-        <Card className={complianceResult.coverage_summary.under > 0
-          ? 'border-rose-200 bg-rose-50/50'
-          : complianceResult.coverage_summary.over > 0
-            ? 'border-amber-200 bg-amber-50/50'
-            : 'border-emerald-200 bg-emerald-50/50'}>
-          <CardContent className="flex items-center gap-3 py-4">
-            {complianceResult.coverage_summary.under > 0
-              ? <AlertTriangle className="h-5 w-5 text-rose-600" />
-              : <CheckCircle className="h-5 w-5 text-emerald-600" />}
-            <div>
-              <p className={cn(
-                'font-medium',
-                complianceResult.coverage_summary.under > 0 ? 'text-rose-800' : 'text-emerald-800',
-              )}>
-                {complianceResult.coverage_summary.under > 0
-                  ? `人力覆蓋：${complianceResult.coverage_summary.under} 個班次人力不足`
-                  : '人力覆蓋達標'}
-              </p>
-              {overCoverageCount > 0 && (
-                <p className="mt-0.5 text-sm text-amber-700">
-                  另有 {overCoverageCount} 個班次超過設定上限
-                </p>
-              )}
-              {unplannedCoverageCount > 0 && (
-                <p className="mt-0.5 text-sm text-orange-700">
-                  {unplannedCoverageCount} 個班次在每日班別未開班的日子仍有人排班
-                </p>
-              )}
-              <p className="mt-0.5 text-xs text-muted-foreground">人力覆蓋屬營運檢查，不影響法規合規判定。</p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* ===== 違規面板（3-2 不合規情形） ===== */}
-      {phase === 'violations' && complianceResult && (
-        <Card className="border-destructive/30 bg-destructive/5">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-destructive">
-              <ShieldAlert className="h-5 w-5" />
-              不合規 — {hardViolations.length} 筆硬性違規{softViolations.length > 0 ? `、${softViolations.length} 筆軟性提醒` : ''}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* 違規摘要 */}
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(complianceResult.summary_by_rule).map(([rule, count]) => (
-                <Badge key={rule} variant="outline" className="border-destructive/30 text-destructive">
-                  {rule} × {count}
-                </Badge>
-              ))}
-            </div>
-            {/* 違規明細（最多顯示 10 筆） */}
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {complianceResult.violations.slice(0, 10).map((v, i) => (
-                <div key={i} className={cn(
-                  'flex items-start gap-3 rounded-lg border px-3 py-2 text-sm',
-                  v.severity === 'hard' ? 'border-destructive/30 bg-destructive/5' : 'border-amber-200 bg-amber-50/50',
-                )}>
-                  <AlertTriangle className={cn('h-4 w-4 mt-0.5 shrink-0', v.severity === 'hard' ? 'text-destructive' : 'text-amber-600')} />
-                  <div>
-                    <span className="font-medium">{v.employee_name}</span>
-                    <span className="text-muted-foreground"> · {v.schedule_date}</span>
-                    <span className="text-muted-foreground"> · {complianceMessage(v)}</span>
-                  </div>
-                  <Badge variant="outline" className={cn(
-                    'ml-auto shrink-0',
-                    v.severity === 'hard' ? 'border-destructive/30 text-destructive' : 'border-amber-300 text-amber-700',
-                  )}>
-                    {v.severity === 'hard' ? '違規' : '提醒'}
-                  </Badge>
-                </div>
-              ))}
-              {complianceResult.violations.length > 10 && (
-                <p className="text-xs text-muted-foreground text-center">
-                  …另有 {complianceResult.violations.length - 10} 筆
-                </p>
-              )}
-            </div>
-            {/* 底部操作按鈕 */}
-            <div className="flex items-center justify-end pt-2 border-t">
-              <Button variant="outline" size="sm" onClick={resetWorkflow}>
-                返回編輯
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+      {/* ===== 合規結果面板 ===== */}
+      {complianceResult && showCompliancePanel && (
+        <ComplianceResultsPanel
+          result={complianceResult}
+          messageForViolation={complianceMessage}
+          onClose={() => setShowCompliancePanel(false)}
+          onNavigate={(date, kind) => {
+            setWeekStart(startOfWeek(parseDate(date)))
+            setScheduleIssueFilter(kind)
+            setShowCompliancePanel(false)
+          }}
+        />
       )}
 
       {/* ===== 週排班表 Grid ===== */}
@@ -1524,6 +1544,55 @@ export default function SchedulesPage() {
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {weekIssueCounts.hard + weekIssueCounts.soft > 0 ? (
+              <div className="flex flex-wrap gap-1 rounded-lg bg-muted p-1" aria-label="班次問題篩選">
+                {([
+                  ['all', '全部班次', weekIssueCounts.hard + weekIssueCounts.soft],
+                  ['hard', '僅看違規', weekIssueCounts.hard],
+                  ['soft', '僅看提醒', weekIssueCounts.soft],
+                ] as const).map(([value, label, count]) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    size="sm"
+                    variant={scheduleIssueFilter === value ? 'default' : 'ghost'}
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setScheduleIssueFilter(value)}
+                  >
+                    {label}{value === 'all' ? '' : ` ${count}`}
+                  </Button>
+                ))}
+              </div>
+            ) : <span />}
+            {canEditSelectedVersion && (
+              <div className="flex rounded-lg border bg-background p-1" aria-label="拖曳模式">
+                {([
+                  ['move', '移動', Move],
+                  ['copy', '複製', Copy],
+                ] as const).map(([value, label, Icon]) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    size="sm"
+                    variant={dragMode === value ? 'secondary' : 'ghost'}
+                    className="h-7 px-2 text-xs"
+                    onClick={() => {
+                      setDragMode(value)
+                      toast({
+                        title: value === 'copy' ? '已切換為複製模式' : '已切換為移動模式',
+                        description: value === 'copy'
+                          ? '拖曳班次會在新位置多排一班，原本的班次保留。'
+                          : '拖曳班次會把它搬到新位置。',
+                      })
+                    }}
+                  >
+                    <Icon className="mr-1 h-3.5 w-3.5" />{label}
+                  </Button>
+                ))}
+              </div>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -1646,7 +1715,11 @@ export default function SchedulesPage() {
                               isUnplannedDay && 'bg-muted/40',
                               isDragTarget && 'bg-primary/10 outline outline-2 outline-primary/40 rounded-md',
                             )}
-                            onDragOver={(ev) => { ev.preventDefault(); setDragOver({ employeeId: e.id, date }) }}
+                            onDragOver={(ev) => {
+                              ev.preventDefault()
+                              ev.dataTransfer.dropEffect = dragMode === 'copy' ? 'copy' : 'move'
+                              setDragOver({ employeeId: e.id, date })
+                            }}
                             onDragLeave={(ev) => {
                               if (!ev.currentTarget.contains(ev.relatedTarget as Node)) setDragOver(null)
                             }}
@@ -1661,31 +1734,23 @@ export default function SchedulesPage() {
                                   const isLeave = schedule.status === 'leave'
                                   const templateIndex = templates.findIndex((t) => t.id === schedule.shift_template.id)
                                   const chip = shiftChipColors[(templateIndex >= 0 ? templateIndex : 0) % shiftChipColors.length]
-                                  const violation = violationMap.get(`${e.id}:${date}:${schedule.shift_template.id}`)
-                                  const warnings = immediateWarningMap.get(schedule.id) ?? []
-                                  const crossVersionSchedules = crossVersionWarningMap.get(schedule.id) ?? []
-                                  const isHard = violation?.severity === 'hard' || warnings.length > 0
-                                  const isCrossVersionWarning = crossVersionSchedules.length > 0
-                                  const isScheduledOnLeave = !isLeave && cellLeaves.length > 0
-                                  const isSoft = (violation?.severity === 'soft' || isCrossVersionWarning || isScheduledOnLeave) && !isHard
+                                  const issues = scheduleIssuesById.get(schedule.id) ?? []
+                                  const hardIssueCount = issues.filter((issue) => issue.severity === 'hard').length
+                                  const softIssueCount = issues.filter((issue) => issue.severity === 'soft').length
+                                  const isHard = hardIssueCount > 0
+                                  const isSoft = !isHard && softIssueCount > 0
+                                  const isDimmed = scheduleIssueFilter !== 'all'
+                                    && !issues.some((issue) => issue.severity === scheduleIssueFilter)
                                   // 拖放不擋（警告哲學），但計畫沒開的班要立即標示
                                   const isUnplannedShift = shiftPlanActive && !isLeave && !plannedShiftIds.has(schedule.shift_template.id)
-                                  const title = [
-                                    ...(isUnplannedShift ? ['未開班：這天的每日班別沒有開這個班，是要改計畫還是移走這個人？'] : []),
-                                    ...(isScheduledOnLeave ? [`請假警告：${cellLeaves.map((leave) => leave.leave_type_display).join('、')}已核准，仍允許手動排班`] : []),
-                                    ...warnings,
-                                    ...crossVersionSchedules.map((other) => {
-                                      const otherVersion = timelineVersions.find((version) => version.id === other.schedule_version)
-                                      return `跨版本重疊：${otherVersion?.version_label ?? `#${other.schedule_version}`} · ${other.shift_template.name}`
-                                    }),
-                                    ...(violation ? [complianceMessage(violation)] : []),
-                                  ].join('\n')
+                                  const title = issues.map((issue) => `${issue.title}：${issue.message}`).join('\n')
                                   return (
                                     <div
                                       key={schedule.id}
                                       draggable={canEditSelectedVersion && !isLeave}
-                                      onDragStart={() => {
+                                      onDragStart={(event) => {
                                         if (!canEditSelectedVersion || isLeave) return
+                                        event.dataTransfer.effectAllowed = dragMode === 'copy' ? 'copy' : 'move'
                                         setDragSource({
                                           id: schedule.id,
                                           employeeId: e.id,
@@ -1699,7 +1764,8 @@ export default function SchedulesPage() {
                                       onDragEnd={() => { setDragSource(null); setDragOver(null) }}
                                       className={cn(
                                         canEditSelectedVersion && !isLeave ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
-                                        dragSource?.id === schedule.id && 'opacity-40',
+                                        dragSource?.id === schedule.id && dragMode === 'move' && 'opacity-40',
+                                        isDimmed && 'opacity-30',
                                       )}
                                     >
                                       <button
@@ -1728,11 +1794,16 @@ export default function SchedulesPage() {
                                             <span className="mt-1 inline-block rounded border border-orange-300 bg-orange-50 px-1 text-[10px] font-medium text-orange-700">未開班</span>
                                           )}
                                         </div>
-                                        {(isHard || isSoft) && !isLeave && (
-                                          <AlertTriangle className={cn(
-                                            'absolute bottom-1.5 right-1.5 h-3 w-3',
-                                            isHard ? 'text-destructive' : 'text-amber-600',
-                                          )} />
+                                        {issues.length > 0 && !isLeave && (
+                                          <span className={cn(
+                                            'absolute right-1 top-1 rounded-full px-1.5 py-0.5 text-[10px] font-bold text-white',
+                                            isHard ? 'bg-destructive' : 'bg-amber-500',
+                                          )}>!{issues.length}</span>
+                                        )}
+                                        {dragSource?.id === schedule.id && dragMode === 'copy' && (
+                                          <span className="absolute bottom-1 right-1 rounded bg-primary px-1 py-0.5 text-[9px] font-medium text-primary-foreground">
+                                            ＋複製
+                                          </span>
                                         )}
                                       </button>
                                     </div>
@@ -2308,6 +2379,58 @@ export default function SchedulesPage() {
               <Label>備註</Label>
               <Input value={scheduleForm.notes} onChange={(e) => setScheduleForm((p) => ({ ...p, notes: e.target.value }))} placeholder="可選填" />
             </div>
+
+            {editingSchedule && (scheduleIssuesById.get(editingSchedule.id)?.length ?? 0) > 0 && (
+              <div className="space-y-3 rounded-lg border p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-medium">班次合規診斷</h3>
+                  <Badge variant="destructive" className="ml-auto">
+                    違規 {(scheduleIssuesById.get(editingSchedule.id) ?? []).filter((issue) => issue.severity === 'hard').length}
+                  </Badge>
+                  <Badge variant="outline" className="border-amber-300 text-amber-700">
+                    提醒 {(scheduleIssuesById.get(editingSchedule.id) ?? []).filter((issue) => issue.severity === 'soft').length}
+                  </Badge>
+                </div>
+                <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                  {(scheduleIssuesById.get(editingSchedule.id) ?? []).map((issue) => (
+                    <div key={issue.id} className={cn(
+                      'rounded-md border p-3 text-sm',
+                      issue.severity === 'hard'
+                        ? 'border-destructive/30 bg-destructive/5'
+                        : 'border-amber-200 bg-amber-50/60 dark:bg-amber-950/20',
+                    )}>
+                      <p className="font-medium">{issue.title}</p>
+                      <p className="mt-1 text-muted-foreground">{issue.message}</p>
+                      {issue.relatedDates.length > 0 && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1">
+                          <span className="text-xs text-muted-foreground">關聯班次</span>
+                          {issue.relatedDates.map((date) => {
+                            const related = parseDate(date)
+                            return (
+                              <Button
+                                key={date}
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-6 px-2 text-xs"
+                                onClick={() => {
+                                  setShowScheduleDialog(false)
+                                  setWeekStart(startOfWeek(related))
+                                  setScheduleIssueFilter(issue.severity)
+                                }}
+                              >
+                                {related.getMonth() + 1}/{related.getDate()} 週{weekdayLabels[(related.getDay() + 6) % 7]}
+                              </Button>
+                            )
+                          })}
+                        </div>
+                      )}
+                      <p className="mt-2 text-xs"><span className="font-medium">建議處理方式：</span>{issue.suggestion}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <DialogFooter className="flex items-center justify-between sm:justify-between">
               <div>

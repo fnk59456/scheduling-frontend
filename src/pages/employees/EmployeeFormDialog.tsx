@@ -33,12 +33,12 @@ function hireDateMax() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-/** 原生 date input 打民國年（110）會得到西元 0110 年；年份 < 1911 視為民國年並換算 */
+/** 原生 date input 打民國年（110）會得到西元 0110 年；只轉換合理的民國年範圍 */
 function convertRocHireDate(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
   if (!match) return null
   const year = Number(match[1])
-  if (year <= 0 || year >= 1911) return null
+  if (year < 1 || year > 150) return null
   return { rocYear: year, value: `${year + 1911}-${match[2]}-${match[3]}` }
 }
 
@@ -295,9 +295,7 @@ export function EmployeeFormDialog({ open, onOpenChange, employee, onDeleted }: 
               <Input type="number" value={form.agreed_hours_per_week} onChange={(e) => set('agreed_hours_per_week', e.target.value)} min={1} max={168} required />
             </div>
             <div className="space-y-1.5">
-              <Label>
-                到職日 <span className="text-xs font-normal text-muted-foreground">西元年，例如 2021/01/01</span>
-              </Label>
+              <Label>到職日（西元年）</Label>
               <Input
                 type="date"
                 value={form.hire_date}
@@ -310,7 +308,9 @@ export function EmployeeFormDialog({ open, onOpenChange, employee, onDeleted }: 
                 max={hireDateMax()}
                 required
               />
-              {hireDateNote && <p className="text-xs text-amber-700">{hireDateNote}</p>}
+              <p className={hireDateNote ? 'min-h-9 text-xs text-amber-700' : 'min-h-9 text-xs text-muted-foreground'}>
+                {hireDateNote || '例如 2021/01/01；若輸入民國年，離開欄位後會自動換算。'}
+              </p>
             </div>
           </div>
 

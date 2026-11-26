@@ -173,7 +173,9 @@ export default function ApprovalScheduleSummaryPage() {
   })
 
   const employees = useMemo(
-    () => [...(employeesQuery.data?.results ?? [])].sort((a, b) => a.employee_id.localeCompare(b.employee_id)),
+    () => [...(employeesQuery.data?.results ?? [])].sort((a, b) => (
+      a.employee_id.localeCompare(b.employee_id, 'zh-TW', { numeric: true })
+    )),
     [employeesQuery.data?.results],
   )
   const timeline = timelineQuery.data
